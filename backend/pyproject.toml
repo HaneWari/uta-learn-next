@@ -1,6 +1,6 @@
 [project]
 name = "utalearn-backend"
-version = "1.1.1"
+version = "1.1.2"
 description = "Uta Learn Next — karaoke-style Japanese learning from songs"
 requires-python = ">=3.12"
 
