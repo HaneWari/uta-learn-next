@@ -1113,16 +1113,21 @@ body {
   display: flex;
   justify-content: center;
   align-items: stretch;
-  gap: clamp(12px, 1.3vw, 22px);
+  /* one gap variable so the 4-up card width can subtract it exactly */
+  --vgap: clamp(12px, 1.3vw, 22px);
+  gap: var(--vgap);
   min-height: 0;
   padding-top: clamp(10px, 1.6vh, 20px);
+  /* never wrap: a second row would push the lyric line up */
   flex-wrap: nowrap;
 }
 
 .vcard {
-  flex: 1 1 0;
+  /* Fixed 4-up width: identical whether the row holds 1, 2, 3 or 4 cards, and
+     never wraps. Previously `flex: 1 1 0` + a 50% media query made four cards
+     fall into two rows on windows narrower than 1400px. */
+  flex: 0 0 calc((100% - 3 * var(--vgap)) / 4);
   min-width: 0;
-  max-width: 460px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1325,22 +1330,14 @@ body {
   line-height: 1.5;
 }
 
-@media (max-width: 1400px) {
-  .vocab {
-    flex-wrap: wrap;
-  }
-  .vcard {
-    flex: 1 1 calc(50% - 12px);
-    max-width: none;
-  }
-}
-
 @media (max-width: 900px) {
+  /* still one row — shrink the card chrome instead of wrapping */
   .vcard {
-    flex: 1 1 100%;
+    padding: 12px 14px 13px;
   }
   .vocab {
     min-height: 0;
+    --vgap: 10px;
   }
 }
 

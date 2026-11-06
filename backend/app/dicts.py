@@ -172,6 +172,11 @@ def enrich(tokens: list[dict]) -> list[dict]:
     for t in tokens:
         if t["pos1"] not in GRAMMATICAL_POS:
             entry = lookup(t)
+            if entry and _pos_conflict(t, entry):
+                # Same spelling, different word class: ほら is an interjection in
+                # a lyric but the dictionary headword is 洞 "cave". Showing the
+                # noun gloss would be worse than showing nothing.
+                entry = None
             if entry:
                 # Prefer the gloss that belongs to this part of speech: one
                 # headword can span homographs (ただ = 徒 "ordinary" as a noun,
@@ -191,6 +196,22 @@ def enrich(tokens: list[dict]) -> list[dict]:
                     t["lemma_kana"] = entry["k"]
         t["romaji"] = to_romaji(t["kana"] or t["surface"])
     return tokens
+
+
+def _pos_conflict(token: dict, entry: dict) -> bool:
+    """True when the entry's word class contradicts the token's.
+
+    Only checked for interjections: they are the class most often stolen by a
+    same-spelling noun (ほら/洞, おや/親), and a noun gloss on an interjection is
+    always wrong. Other classes are handled by the per-POS gloss table.
+    """
+    if token["pos1"] != "感動詞":
+        return False
+    have = entry.get("p") or ""
+    if have == "感叹词":
+        return False
+    by_pos = entry.get("s") or {}
+    return "感叹词" not in by_pos
 
 
 LEVEL_SCORE = {"N1": 5, "N2": 4, "N3": 3, "N4": 2, "N5": 1}
