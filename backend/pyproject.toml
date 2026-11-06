@@ -1,8 +1,52 @@
 [project]
 name = "utalearn-backend"
-version = "0.1.0"
+version = "1.0.0"
+description = "Uta Learn Next — karaoke-style Japanese learning from songs"
 requires-python = ">=3.12"
+
+# Core: enough to serve the API, search lyrics sources and read audio metadata.
 dependencies = [
-    "fastapi",
-    "uvicorn[standard]",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    # required by FastAPI for multipart file uploads
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
+    "numpy>=1.26",
+    "pillow>=10.0",
 ]
+
+[project.optional-dependencies]
+# Morphology + speech recognition. Needed for 自定义歌词 (whisper alignment) and
+# for the vocabulary cards (fugashi tokenisation).
+speech = [
+    "fugashi>=1.3",
+    "faster-whisper>=1.0",
+    "unidic-lite>=1.0",
+]
+# Video export: Playwright drives the headless browser, ffmpeg must be on PATH.
+export = [
+    "playwright>=1.44",
+]
+# GPU acceleration for whisper. Optional: without it whisper falls back to CPU
+# int8, and ctranslate2 simply does not get the cuBLAS/cuDNN DLL path.
+gpu = [
+    "torch>=2.2",
+]
+dev = [
+    "ruff>=0.5",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = []

@@ -1,21 +1,18 @@
+# One service on purpose: the API also serves the built SPA, exactly like dev.cmd
+# does. The image builds the frontend itself, so the build context is the repo
+# root rather than backend/.
 services:
-  backend:
-    build: backend/
+  app:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     ports:
       - "8000:8000"
+    # writable: uploads, generated datasets and exports all live here
     volumes:
-      - ./localdata:/data:ro
-      - ./backend:/app
+      - ./localdata:/data
+      - ./exports:/exports
     environment:
       - DATA_DIR=/data
-    command: uv run uvicorn main:app --host 0.0.0.0 --port 8000 --reload
-
-  frontend:
-    build: frontend/
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
+      - EXPORT_DIR=/exports
+    restart: unless-stopped

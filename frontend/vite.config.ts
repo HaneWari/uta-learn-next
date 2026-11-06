@@ -6,7 +6,8 @@ export default defineConfig({
   server: {
     host: true,
     proxy: {
-      "/poc": "http://backend:8000",
+      "/poc": "http://localhost:8000",
+      "/api": "http://localhost:8000",
     },
   },
 });
