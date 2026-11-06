@@ -27,24 +27,34 @@ Windows 双击 **`dev.cmd`**；macOS / Linux 运行 **`./dev.sh`**。
 
 ### 免安装（解压即用）
 
-不想装 Python / Node / ffmpeg，可以直接用便携包：
+不想装 Python / Node / ffmpeg，直接用发行包。同一个版本提供两份压缩包，按需下载：
 
-```bash
-python tools/build_portable.py            # 生成 dist-portable/UtaLearnNext/
-python tools/build_portable.py --with-export   # 连 Chromium 一起打（导出视频用）
-```
+| 压缩包 | 体积 | 导出视频 | 说明 |
+| --- | --- | --- | --- |
+| `UtaLearnNext-<版本>-lite.zip` | ~285 MB | 取决于本机是否装了 Chrome | 搜索歌词、生成、跟唱、词汇卡全部可用 |
+| `UtaLearnNext-<版本>-full.zip` | ~600 MB | ✅ 一定可用 | 额外内置 Chromium，干净机器也能导出 |
 
-生成的文件夹里双击 **`启动 Uta Learn Next.cmd`** 即可。它自带 Python 运行时、
-ffmpeg/ffprobe 和已构建好的前端，不写注册表、不改 PATH、不需要管理员权限。
+两者解压后双击 **`启动 Uta Learn Next.cmd`** 即可。都自带 Python 运行时、ffmpeg/ffprobe
+与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。
+
 数据默认写在文件夹内的 `localdata/` 与 `exports/`（便携语义，整个文件夹可拷走）；
 如果文件夹不可写（例如解压到受保护目录），会自动回退到 `%LOCALAPPDATA%\UtaLearnNext\`。
 
-体积参考：核心约 **1.2 GB**（`unidic_lite` 词典 249MB、playwright 109MB、
-ctranslate2+onnxruntime 110MB、numpy 55MB、ffmpeg+ffprobe 435MB）。
-想更小可以换成精简版 ffmpeg 构建（单个约 80MB），或去掉 `speech` extra
-（代价是「自定义歌词」的自动对齐不可用）。
+自己打包：
 
-### Docker
+```bash
+python tools/build_portable.py                    # 同时产出 lite 与 full 两个 zip
+python tools/build_portable.py --no-full          # 只做 lite
+python tools/build_portable.py --no-zip           # 只生成文件夹
+python tools/build_portable.py --out D:/build     # 换构建目录（磁盘空间不够时用）
+python tools/build_portable.py --zip-out D:/rel --browsers-dir D:/br   # 大文件放别的盘
+```
+
+ffmpeg 用的是 **essentials（精简）构建**：静态链接、单个约 104 MB（全量版要 218 MB），
+仍包含本应用需要的 `libx264`、`aac`、常见音频解码器与 `fps/setpts/tpad` 滤镜。
+只有罕见格式（wma/ape/amr 等）可能解不开，导出与跟唱不受影响。
+
+### Docker### Docker
 
 ```bash
 docker compose up --build
