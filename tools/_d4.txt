@@ -1,5 +1,0 @@
-搜索命中: 小さな恋のうた (小小恋歌) / Mongol800
-job c5c453e35182 初始 name='小さな恋のうた-新垣结衣-2'
-状态 done msg=完成
-result.name='小さな恋のうた-新垣结衣-2'
-  GET /api/songs/quote -> 200

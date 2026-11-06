@@ -1,5 +1,0 @@
-index.html 长度 477
-引用资源: ['/favicon.svg', '/assets/index-BkEzfioC.js', '/assets/index-DTniu5OG.css']
-  /favicon.svg -> 200 (341 bytes)
-  /assets/index-BkEzfioC.js -> 200 (222384 bytes)
-  /assets/index-DTniu5OG.css -> 200 (32703 bytes)
