@@ -114,6 +114,29 @@ export default function App() {
     );
   }
 
+  // A dataset can disappear while its name is still in the URL: the user deleted
+  // it, or generated the same song twice (the second one gets a "-2" suffix) and
+  // removed the first. Rather than a dead "载入失败 HTTP 404" screen, fall back
+  // to whatever is still available and say so.
+  const [recovered, setRecovered] = useState<string | null>(null);
+  useEffect(() => {
+    if (!error || !songs.length) return;
+    if (!/40[34]/.test(error)) return;
+    const fallback = songs.find((s) => s.has_audio) ?? songs[0];
+    if (!fallback || fallback.name === song) return;
+    setRecovered(`「${song ?? ""}」已不存在，已切到「${fallback.title}」`);
+    setSong(fallback.name);
+    const url = new URL(window.location.href);
+    url.searchParams.set("song", fallback.name);
+    window.history.replaceState(null, "", url.toString());
+  }, [error, songs, song]);
+
+  useEffect(() => {
+    if (!recovered) return;
+    const t = setTimeout(() => setRecovered(null), 8000);
+    return () => clearTimeout(t);
+  }, [recovered]);
+
   const current = songs.find((s) => s.name === song);
 
   return (
@@ -166,6 +189,13 @@ export default function App() {
         />
       )}
 
+      {recovered && (
+        <div className="export-toast" role="status">
+          <span>{recovered}</span>
+          <button onClick={() => setRecovered(null)} aria-label="关闭">×</button>
+        </div>
+      )}
+
       {exportNote && (
         <div className="export-toast" role="status">
           <span>{exportNote}</span>
@@ -183,8 +213,10 @@ export default function App() {
             onPlay={play}
             onDeleted={handleDeleted}
           />
-        ) : error ? (
+        ) : error && !songs.length ? (
           <p className="status">载入失败：{error}</p>
+        ) : error ? (
+          <p className="status">正在切换到可用曲目…</p>
         ) : loading || !songData || !song ? (
           <p className="status">正在载入…</p>
         ) : (

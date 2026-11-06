@@ -1,0 +1,5 @@
+quote 全编码              -> 200
+quote 保留 -             -> 200
+双编码                    -> 404
+仅编码中文部分                -> 404
+不编码(原始)                -> 'ascii' codec can't encode characters in position 15-21: ordinal not in range(128)

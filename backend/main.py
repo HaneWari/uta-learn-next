@@ -122,7 +122,14 @@ def dataset(name: str | None) -> Path:
             raise HTTPException(status_code=400, detail="bad song name")
         candidate = DATA_DIR / name
         if not candidate.is_dir():
-            raise HTTPException(status_code=404, detail=f"unknown song: {name}")
+            # Generating the same song twice appends "-2", and deleting the older
+            # one leaves stale links behind. Point at the survivor instead of a
+            # bare "not found".
+            base = re.sub(r"-\d+$", "", name)
+            near = [p.name for p in DATA_DIR.glob(f"{base}*") if p.is_dir()] \
+                if DATA_DIR.is_dir() else []
+            hint = f"，可用的是：{'、'.join(near[:3])}" if near else ""
+            raise HTTPException(status_code=404, detail=f"unknown song: {name}{hint}")
         return candidate
     nested = DATA_DIR / DEFAULT_SONG
     if nested.is_dir() and (nested / "song_data.json").exists():
