@@ -83,6 +83,18 @@ def _chrome(pw=None) -> str | None:
                 if p.exists():
                     candidates.append(str(p))
 
+    # A normal Chrome install is *not* on PATH, so `which` alone misses the
+    # browser most Windows/macOS users already have.
+    for guess in (
+        r"C:/Program Files/Google/Chrome/Application/chrome.exe",
+        r"C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium",
+    ):
+        if Path(guess).exists():
+            candidates.append(guess)
+
     for name in ("chrome", "google-chrome", "chromium"):
         found = shutil.which(name)
         if found:
