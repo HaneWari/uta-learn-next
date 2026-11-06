@@ -31,13 +31,52 @@ from app.builder import build as build_song
 from app.builder import slugify
 from app.sources import SOURCES, Song, get_source, search_all
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", "../localdata")).resolve()
+# --------------------------------------------------------------------------- #
+# where data lives
+# --------------------------------------------------------------------------- #
+# Everything is resolved against the *application folder*, never the current
+# working directory: a portable build gets unzipped anywhere and started from
+# anywhere, and `../localdata` relative to CWD silently pointed at the wrong
+# place (or at nothing) as soon as the launcher's working directory changed.
+APP_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _is_writable(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write-probe"
+        probe.write_text("", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _user_dir(name: str) -> Path:
+    """Per-user fallback for when the app folder itself is read-only."""
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "share"
+    return root / "UtaLearnNext" / name
+
+
+def _resolve_dir(env_name: str, portable: Path, fallback_name: str) -> Path:
+    """env override → folder next to the app → per-user directory."""
+    raw = os.environ.get(env_name)
+    if raw:
+        p = Path(raw).expanduser()
+        return (p if p.is_absolute() else APP_ROOT / p).resolve()
+    if _is_writable(portable):
+        return portable.resolve()
+    return _user_dir(fallback_name)
+
+
+DATA_DIR = _resolve_dir("DATA_DIR", APP_ROOT / "localdata", "localdata")
 UPLOAD_DIR = DATA_DIR / "_uploads"
 DEFAULT_SONG = os.environ.get("DEFAULT_SONG", "braveheart")
-DIST_DIR = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+DIST_DIR = APP_ROOT / "frontend" / "dist"
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".mp4"}
 MAX_UPLOAD = 200 * 1024 * 1024
-EXPORT_DIR = Path(os.environ.get("EXPORT_DIR", "../exports")).resolve()
+EXPORT_DIR = _resolve_dir("EXPORT_DIR", APP_ROOT / "exports", "exports")
 
 from contextlib import asynccontextmanager
 
@@ -46,9 +85,14 @@ from contextlib import asynccontextmanager
 async def lifespan(_app: FastAPI):
     # staging uploads are only meaningful while a song is being configured
     try:
-        _prune_uploads()
+        removed = _prune_uploads()
+        if removed:
+            print(f"[uta] 清理了 {removed} 个过期上传")
     except Exception:  # noqa: BLE001
         pass
+    print(f"[uta] 程序目录 {APP_ROOT}")
+    print(f"[uta] 数据目录 {DATA_DIR}")
+    print(f"[uta] 导出目录 {EXPORT_DIR}")
     yield
 
 

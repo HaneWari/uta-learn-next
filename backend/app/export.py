@@ -11,6 +11,8 @@ Two things make the output line up with its audio:
 """
 from __future__ import annotations
 
+from . import binaries
+
 import os
 import shutil
 import subprocess
@@ -60,14 +62,21 @@ def _chrome(pw=None) -> str | None:
     except Exception:  # noqa: BLE001
         pass
 
-    # any chromium build already in the cache, newest revision first
-    cache = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")) if os.environ.get(
-        "PLAYWRIGHT_BROWSERS_PATH") else Path.home() / "AppData/Local/ms-playwright"
-    if not cache.is_dir():
-        cache = Path.home() / ".cache/ms-playwright"
-    if cache.is_dir():
-        builds = sorted(cache.glob("chromium-*"), reverse=True)
-        for b in builds:
+    # Any chromium build already on disk, newest revision first. The portable
+    # build ships one next to the app (`browsers/`), so that folder is checked
+    # before the per-user cache — no installation, no download.
+    roots: list[Path] = []
+    bundled = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if bundled:
+        roots.append(Path(bundled))
+    roots.append(Path(__file__).resolve().parents[2] / "browsers")
+    roots.append(Path.home() / "AppData/Local/ms-playwright")
+    roots.append(Path.home() / ".cache/ms-playwright")
+
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for b in sorted(root.glob("chromium-*"), reverse=True):
             for rel in ("chrome-win64/chrome.exe", "chrome-linux/chrome",
                         "chrome-mac/Chromium.app/Contents/MacOS/Chromium"):
                 p = b / rel
@@ -93,7 +102,7 @@ def available() -> tuple[bool, str]:
         return False, "没有安装 playwright（python -m pip install playwright）"
     if _chrome() is None:
         return False, "没找到 Chrome/Chromium"
-    if shutil.which("ffmpeg") is None:
+    if binaries.find("ffmpeg") is None:
         return False, "没找到 ffmpeg"
     return True, ""
 
@@ -114,7 +123,7 @@ def _grab(video: Path, t: float, out: Path) -> "object":
     from PIL import Image
 
     subprocess.run(
-        ["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{t:.3f}",
+        [binaries.ffmpeg(), "-y", "-loglevel", "error", "-ss", f"{t:.3f}",
          "-i", str(video), "-frames:v", "1", str(out)],
         check=True, capture_output=True,
     )
@@ -159,7 +168,7 @@ def _probe_duration(video: Path) -> float:
     """Container duration in seconds, or 0 when ffprobe cannot read it."""
     try:
         out = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+            [binaries.ffprobe(), "-v", "quiet", "-show_entries", "format=duration",
              "-of", "csv=p=0", str(video)],
             capture_output=True, text=True, check=True,
         ).stdout.strip()
@@ -179,7 +188,7 @@ def _mux(raw: Path, audio: Path | None, out: Path, duration: float,
     Scaling the presentation timestamps by (real elapsed / recorded span) puts
     the picture back on the audio's clock.
     """
-    cmd = ["ffmpeg", "-y", "-v", "error"]
+    cmd = [binaries.ffmpeg(), "-y", "-v", "error"]
     if skip > 0.02:
         cmd += ["-ss", f"{skip:.3f}"]
     cmd += ["-i", str(raw)]

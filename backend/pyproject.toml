@@ -10,7 +10,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     # required by FastAPI for multipart file uploads
     "python-multipart>=0.0.9",
-    "httpx>=0.27",
+    # [http2] pulls `h2`: sources.py opens the QQ/Kugou clients with http2=True
+    "httpx[http2]>=0.27",
     "numpy>=1.26",
     "pillow>=10.0",
 ]

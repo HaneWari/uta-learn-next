@@ -32,3 +32,6 @@ Thumbs.db
 # ---- 临时文件 ----
 *.log
 *.tmp
+
+# ---- 便携版构建产物（1GB+，绝不提交）----
+dist-portable/

@@ -18,6 +18,8 @@ Pipeline
 """
 from __future__ import annotations
 
+from . import binaries
+
 import os
 import re
 import subprocess
@@ -46,14 +48,14 @@ SMOOTH = 3
 def to_wav(src: str | Path, dst: str | Path | None = None) -> Path:
     """Decode anything ffmpeg reads into 16 kHz mono 16-bit PCM."""
     dst = Path(dst) if dst else Path(tempfile.gettempdir()) / f"utalearn_{os.getpid()}.wav"
-    cmd = ["ffmpeg", "-y", "-v", "error", "-i", str(src),
+    cmd = [binaries.ffmpeg(), "-y", "-v", "error", "-i", str(src),
            "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", str(dst)]
     subprocess.run(cmd, check=True, capture_output=True)
     return dst
 
 
 def probe_duration(src: str | Path) -> float:
-    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+    cmd = [binaries.ffprobe(), "-v", "error", "-show_entries", "format=duration",
            "-of", "default=nw=1:nk=1", str(src)]
     out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
     try:

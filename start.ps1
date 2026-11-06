@@ -49,6 +49,24 @@ if (-not (Get-Command ffmpeg -ErrorAction SilentlyContinue)) {
   Say "[!] 没找到 ffmpeg：上传的音频无法解码，自动对齐会失败。" DarkYellow
 }
 
+# ---------------------------------------------------- 导出用的浏览器（可选）----
+# Portable builds ship a `browsers` folder next to the app: point Playwright at
+# it so exporting needs no installation and no download.
+$bundledBrowsers = Join-Path $root "browsers"
+if (Test-Path $bundledBrowsers) {
+  $env:PLAYWRIGHT_BROWSERS_PATH = $bundledBrowsers
+  Say "已启用随包浏览器（导出视频可用）" Green
+} else {
+  Push-Location backend
+  $exportOk = (python -c "from app import export; print('OK' if export.available()[0] else 'NO')" 2>$null)
+  Pop-Location
+  if ($exportOk -notcontains "OK") {
+    Say "[!] 导出视频暂不可用：没找到 Chromium（其余功能不受影响）" DarkYellow
+    Say "    免安装办法：把随包的 browsers 文件夹放到 $root\browsers" DarkYellow
+    Say "    或联网执行一次：python -m playwright install chromium" DarkYellow
+  }
+}
+
 # --------------------------------------------------------------- 前端 ----
 Say "[2/3] 检查前端页面..."
 $needBuild = $rebuild -or -not (Test-Path "frontend\dist\index.html")

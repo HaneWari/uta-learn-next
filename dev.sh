@@ -33,6 +33,19 @@ python -c "import faster_whisper" >/dev/null 2>&1 || \
 command -v ffmpeg >/dev/null 2>&1 || \
   echo "  note: ffmpeg not found — uploaded audio cannot be decoded"
 
+# ---- browser for video export (optional, never blocks startup) ----
+if [ -d "$ROOT/browsers" ]; then
+  export PLAYWRIGHT_BROWSERS_PATH="$ROOT/browsers"
+  echo "  bundled browser found — video export ready"
+else
+  ok=$( cd "$ROOT/backend" && python -c "from app import export; print('OK' if export.available()[0] else 'NO')" 2>/dev/null )
+  if [ "$ok" != "OK" ]; then
+    echo "  note: video export unavailable (no Chromium). Everything else works."
+    echo "        portable: put the bundled 'browsers' folder at $ROOT/browsers"
+    echo "        or run once: python -m playwright install chromium"
+  fi
+fi
+
 # ---- frontend --------------------------------------------------------------
 if [ "$REBUILD" = 1 ] || [ ! -f frontend/dist/index.html ]; then
   if [ ! -d frontend/node_modules ]; then

@@ -25,6 +25,25 @@ Windows 双击 **`dev.cmd`**；macOS / Linux 运行 **`./dev.sh`**。
 
 一个进程同时提供页面和 API，关掉窗口即停止。
 
+### 免安装（解压即用）
+
+不想装 Python / Node / ffmpeg，可以直接用便携包：
+
+```bash
+python tools/build_portable.py            # 生成 dist-portable/UtaLearnNext/
+python tools/build_portable.py --with-export   # 连 Chromium 一起打（导出视频用）
+```
+
+生成的文件夹里双击 **`启动 Uta Learn Next.cmd`** 即可。它自带 Python 运行时、
+ffmpeg/ffprobe 和已构建好的前端，不写注册表、不改 PATH、不需要管理员权限。
+数据默认写在文件夹内的 `localdata/` 与 `exports/`（便携语义，整个文件夹可拷走）；
+如果文件夹不可写（例如解压到受保护目录），会自动回退到 `%LOCALAPPDATA%\UtaLearnNext\`。
+
+体积参考：核心约 **1.2 GB**（`unidic_lite` 词典 249MB、playwright 109MB、
+ctranslate2+onnxruntime 110MB、numpy 55MB、ffmpeg+ffprobe 435MB）。
+想更小可以换成精简版 ffmpeg 构建（单个约 80MB），或去掉 `speech` extra
+（代价是「自定义歌词」的自动对齐不可用）。
+
 ### Docker
 
 ```bash
