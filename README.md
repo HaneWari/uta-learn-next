@@ -54,7 +54,7 @@ ffmpeg 用的是 **essentials（精简）构建**：静态链接、单个约 104
 仍包含本应用需要的 `libx264`、`aac`、常见音频解码器与 `fps/setpts/tpad` 滤镜。
 只有罕见格式（wma/ape/amr 等）可能解不开，导出与跟唱不受影响。
 
-### Docker### Docker
+### Docker
 
 ```bash
 docker compose up --build
