@@ -1,5 +1,10 @@
 # Uta Learn Next
 
+[![Release](https://img.shields.io/github/v/release/HaneWari/uta-learn-next)](https://github.com/HaneWari/uta-learn-next/releases)
+[![Downloads](https://img.shields.io/github/downloads/HaneWari/uta-learn-next/total)](https://github.com/HaneWari/uta-learn-next/releases)
+[![Stars](https://img.shields.io/github/stars/HaneWari/uta-learn-next)](https://github.com/HaneWari/uta-learn-next/stargazers)
+[![License](https://img.shields.io/github/license/HaneWari/uta-learn-next)](./LICENSE)
+
 跟着日语歌学日语：**逐字**卡啦 OK 高亮、标注汉字的假名注音、罗马音、中文翻译，以及按真实词元
 （辞书形 + 词性 + JLPT + 中文释义）和句型整理的词汇卡。可以把自己下载的音频配任意歌词源，
 也能一键导出 1920×1080 / 60fps 的成片。
@@ -7,6 +12,26 @@
 **本项目不提供相关音频资源，请自行获取**
 
 本项目在[utalearn](https://github.com/rafaelanobre/utalearn)基础上开发而来。
+
+---
+
+## 界面预览
+
+**跟唱舞台** —— 逐字高亮只标汉字的假名注音、罗马音、中文翻译；下方是当前这一句的词汇卡与句型卡。
+
+![跟唱舞台](docs/screenshots/hero.png)
+
+**词汇卡与句型卡** —— 辞书形 + 读音 + 词性 + JLPT + 中文释义；歌里用的是屈折形时，会另外标出实际形式。
+
+![词汇卡与句型卡](docs/screenshots/cards.png)
+
+**导出成片** —— 一键导出 1920×1080 / 60fps。下图取自实际导出的 mp4，可见逐字高亮正在擦过「雨」字。
+
+![导出成片](docs/screenshots/export.png)
+
+**配置** —— 放入自己下载的音频，选一份歌词源，剩下的交给它。
+
+![配置界面](docs/screenshots/config.png)
 
 ---
 
