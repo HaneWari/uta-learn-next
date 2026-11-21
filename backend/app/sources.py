@@ -13,7 +13,9 @@ import random
 import re
 import time
 import zlib
+import socket
 from dataclasses import dataclass, field
+from urllib.request import getproxies
 
 import httpx
 
@@ -21,6 +23,37 @@ from .qrc_des import qrc_decrypt
 
 TIMEOUT = 20
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+
+
+_PROXY_CACHE: list[str | None] = []
+
+
+def _system_proxy() -> str | None:
+    """Pick up the proxy the app should use.
+
+    httpx only honours the *_PROXY env vars by default, and a Windows "system
+    proxy" never sets them — so on a machine running Clash/V2Ray or a
+    corporate proxy every lyric source fails at once with a socket
+    permission error (WinError 10013). Order:
+    1. the real OS/env proxy setting, if one is configured;
+    2. well-known local proxy ports (Clash 7890/7897, V2Ray 1080, etc.) — a
+       quick connect probe, so direct networks pay no cost.
+    """
+    if _PROXY_CACHE:
+        return _PROXY_CACHE[0]
+    px = getproxies()
+    env = px.get("https") or px.get("http")
+    proxy = env
+    if not proxy:
+        for port in (7890, 7897, 10808, 1080, 8889, 8888, 8080, 4780):
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+                    proxy = f"http://127.0.0.1:{port}"
+                    break
+            except OSError:
+                continue
+    _PROXY_CACHE.append(proxy)
+    return proxy
 
 
 @dataclass
@@ -73,7 +106,7 @@ class QQSource:
         self.client = httpx.Client(
             headers={"cookie": "tmeLoginType=-1;", "content-type": "application/json",
                      "accept-encoding": "gzip", "user-agent": "okhttp/3.14.9"},
-            http2=True, timeout=TIMEOUT,
+            http2=True, timeout=TIMEOUT, proxy=_system_proxy(),
         )
         self._comm: dict | None = None
 
@@ -199,7 +232,8 @@ class KugouSource:
     def __init__(self) -> None:
         # kugou's CDN cert does not match the hostname, so verification is off
         self.client = httpx.Client(headers={"user-agent": UA}, timeout=TIMEOUT,
-                                   follow_redirects=True, verify=False)
+                                   follow_redirects=True, verify=False,
+                                   proxy=_system_proxy())
 
     def search(self, query: str) -> list[Song]:
         url = "https://mobilecdn.kugou.com/api/v3/search/song"
@@ -281,7 +315,8 @@ class LrclibSource:
     label = "Lrclib"
 
     def __init__(self) -> None:
-        self.client = httpx.Client(headers={"user-agent": "UtaLearn/0.1"}, timeout=TIMEOUT)
+        self.client = httpx.Client(headers={"user-agent": "UtaLearn/0.1"},
+                                   timeout=TIMEOUT, proxy=_system_proxy())
 
     def search(self, query: str) -> list[Song]:
         r = self.client.get("https://lrclib.net/api/search", params={"q": query})
