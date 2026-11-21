@@ -83,19 +83,37 @@ def _chrome(pw=None) -> str | None:
                 if p.exists():
                     candidates.append(str(p))
 
-    # A normal Chrome install is *not* on PATH, so `which` alone misses the
-    # browser most Windows/macOS users already have.
+    # A normal browser install is *not* on PATH, so `which` alone misses the
+    # browser most users already have. Anything with a Chromium core works —
+    # Playwright's record_video only needs CDP, not Google Chrome specifically —
+    # so Edge (bundled with Windows), Brave, Vivaldi, 360, QQ, Sogou etc. all
+    # count as a working export browser.
     for guess in (
         r"C:/Program Files/Google/Chrome/Application/chrome.exe",
         r"C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
+        r"C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+        r"C:/Program Files/Microsoft/Edge/Application/msedge.exe",
+        r"C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe",
+        r"C:/Program Files (x86)/BraveSoftware/Brave-Browser/Application/brave.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%/Programs/Vivaldi/Application/vivaldi.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%/360Chrome/Chrome/Application/360chrome.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%/Tencent/QQBrowser/qqbrowser.exe"),
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
         "/usr/bin/google-chrome",
+        "/usr/bin/microsoft-edge",
+        "/usr/bin/brave-browser",
         "/usr/bin/chromium",
     ):
         if Path(guess).exists():
             candidates.append(guess)
 
-    for name in ("chrome", "google-chrome", "chromium"):
+    for name in (
+        "chrome", "google-chrome", "chromium",
+        "msedge", "microsoft-edge", "edge",
+        "brave", "brave-browser", "vivaldi",
+    ):
         found = shutil.which(name)
         if found:
             candidates.append(found)
@@ -113,7 +131,7 @@ def available() -> tuple[bool, str]:
     except Exception:  # noqa: BLE001
         return False, "没有安装 playwright（python -m pip install playwright）"
     if _chrome() is None:
-        return False, "没找到 Chrome/Chromium"
+        return False, "没找到 Chromium 内核浏览器（Chrome / Edge / Brave / 其他均可）"
     if binaries.find("ffmpeg") is None:
         return False, "没找到 ffmpeg"
     return True, ""

@@ -56,13 +56,13 @@ Windows 双击 **`dev.cmd`**；macOS / Linux 运行 **`./dev.sh`**。
 
 | 压缩包 | 体积 | 说明 |
 | --- | --- | --- |
-| `UtaLearnNext-<版本>-lite.zip` | ~290 MB | 完整应用：搜索歌词、生成、跟唱、词汇卡、歌词/卡片编辑。本机已装 Chrome 时可直接导出视频。 |
-| `UtaLearnNext-<版本>-chromium.zip` | ~316 MB | 可选扩展包：内置 Chromium。没有 Chrome 又想导出视频时，把它解压到 lite 目录的 `browsers/` 即可。 |
+| `UtaLearnNext-<版本>-lite.zip` | ~290 MB | 完整应用：搜索歌词、生成、跟唱、词汇卡、歌词/卡片编辑。本机有任意 Chromium 内核浏览器（Chrome / Edge / Brave / 360 / QQ 等）即可直接导出视频。 |
+| `UtaLearnNext-<版本>-chromium.zip` | ~316 MB | 可选扩展包：内置 Chromium。没有 Chromium 内核浏览器又想导出视频时，把它解压到 lite 目录的 `browsers/` 即可。 |
 
 lite 解压后双击 **`启动 Uta Learn Next.cmd`** 即可。自带 Python 运行时、ffmpeg/ffprobe
-与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。需要导出但本机没装
-Chrome 时，再把 chromium 扩展包解压进来就行——程序下次启动会自动识别 `browsers/`，
-不用装、不用改配置。
+与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。需要导出但本机没有
+Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium 扩展包解压进来就行——
+程序下次启动会自动识别 `browsers/`，不用装、不用改配置。
 
 数据默认写在文件夹内的 `localdata/` 与 `exports/`（便携语义，整个文件夹可拷走）；
 如果文件夹不可写（例如解压到受保护目录），会自动回退到 `%LOCALAPPDATA%\UtaLearnNext\`。
@@ -180,8 +180,10 @@ whisper 的起唱偏差不是固定值，会沿歌曲缓慢漂移，而漂移在
   现在用「播放开始→结束」的墙钟时长除以录制跨度得到缩放系数，`setpts` 校正后再转 60fps
 - 录完会读成片进度条像素反推音画偏差，必要时自动重混一次
 
-需要 Playwright 的 Chromium 与 ffmpeg。浏览器路径可用 `UTALEARN_CHROME` 指定，否则用
-Playwright 自带的、再退到系统 Chrome。
+需要 Playwright 驱动的 Chromium 内核浏览器与 ffmpeg——不一定是 Google Chrome，
+**任何 Chromium 内核浏览器都行**（Windows 自带的 Edge、Brave、Vivaldi、360、QQ 等）。
+浏览器路径可用 `UTALEARN_CHROME` 指定，否则按顺序探测：环境变量 → `browsers/` 扩展包 →
+Playwright 缓存 → 各常见安装路径（Edge/Brave/Vivaldi/国产浏览器都在探测列表里）→ PATH。
 
 ### 校验成片音画同步
 
