@@ -1629,18 +1629,8 @@ body {
   overflow: hidden;
 }
 
-/* cards wrap naturally at their own width instead of being forced 2-up */
-@media (max-width: 1400px) {
-  .vcard {
-    flex: 1 1 300px;
-  }
-}
-
-@media (max-width: 900px) {
-  .vcard {
-    flex: 1 1 100%;
-  }
-}
+/* The row keeps a fixed 4-up width on every screen; narrower budgets simply
+   show fewer cards (see useCardBudget), never a different card width. */
 
 /* ---------- destructive actions ---------- */
 

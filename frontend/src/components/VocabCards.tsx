@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useCallback } from "react";
 import type { GrammarHit, Segment, WordTiming } from "../types";
 
@@ -80,13 +80,12 @@ type CardData = VocabCardData | GrammarCardData;
 
 const EXTRA_BASE = 10000;
 
-/** Move `dragId` next to `overId` (insert before it, or after if it was
- *  already past it). */
-function reorderPreview(ids: number[], dragId: number, overId: number) {
-  const rest = ids.filter((id) => id !== dragId);
-  const at = rest.indexOf(overId);
-  if (at < 0) return rest.concat(dragId);
-  rest.splice(at, 0, dragId);
+/** Move `dragKey` to where `overKey` sits in the visible row. */
+function reorderPreview(keys: string[], dragKey: string, overKey: string) {
+  const rest = keys.filter((k) => k !== dragKey);
+  const at = rest.indexOf(overKey);
+  if (at < 0) return rest.concat(dragKey);
+  rest.splice(at, 0, dragKey);
   return rest;
 }
 
@@ -174,23 +173,6 @@ function computeCards(
     w,
   }));
 
-  // default order = generated words first, then hand-made extras, in the
-  // order they were added; `order` can interleave them however the user
-  // dragged them
-  const byId = new Map(
-    [...genCards, ...extraCards].map((c) => [c.id, c] as const),
-  );
-  const defaultOrder = [...genCards, ...extraCards].map((c) => c.id);
-  const order = ov.order.length
-    ? [
-        ...ov.order.filter((id) => byId.has(id)),
-        ...defaultOrder.filter((id) => !ov.order.includes(id)),
-      ]
-    : defaultOrder;
-  const words: VocabCardData[] = order
-    .map((id) => byId.get(id))
-    .filter((c): c is VocabCardData => !!c);
-
   const grammar: GrammarCardData[] = [
     ...(segment.grammar ?? [])
       .filter((g) => !gov.remove.includes(g.id))
@@ -213,10 +195,36 @@ function computeCards(
     ),
   ];
 
-  const room = budget - Math.min(1, grammar.length);
-  // order already carries the user's arrangement; just fit it into the row
-  const wordsShown = words.slice(0, room);
-  return [...wordsShown, ...grammar].slice(0, budget);
+  // One ordering for the whole row. Newer saves store every card's `key`
+  // (`w${index}` / `wx${i}` / `g-${id}` / `gx${i}`); older saves only listed
+  // generated word indexes, which are normalised to `w${index}` keys first.
+  const all: CardData[] = [...genCards, ...extraCards, ...grammar];
+  const byKey = new Map(all.map((c) => [c.key, c] as const));
+  const defaultKeys = all.map((c) => c.key);
+  const storedKeys = ov.order.map((o) =>
+    typeof o === "number" ? `w${o}` : o,
+  );
+  const orderedKeys = storedKeys.length
+    ? [
+        ...storedKeys.filter((k) => byKey.has(k)),
+        ...defaultKeys.filter((k) => !storedKeys.includes(k)),
+      ]
+    : defaultKeys;
+
+  // Fit the ordered row into the budget. A grammar card always keeps one
+  // reserved slot (it is the line's pattern, not just another word), so word
+  // cards fill `budget - gSlots` and never push the grammar card out — while
+  // still letting the user drag it anywhere in the row.
+  const ordered = orderedKeys
+    .map((k) => byKey.get(k))
+    .filter((c): c is CardData => !!c);
+  const gSlots = Math.min(1, ordered.filter((c) => c.kind === "grammar").length);
+  const wordBudget = budget - gSlots;
+  let wTaken = 0;
+  let gTaken = 0;
+  return ordered.filter((c) =>
+    c.kind === "word" ? wTaken++ < wordBudget : gTaken++ < gSlots,
+  );
 }
 
 /**
@@ -259,6 +267,7 @@ function pickWords(segment: Segment | null, limit: number): WordTiming[] {
 function VocabCard({
   w,
   i,
+  cardKey,
   editing,
   draft,
   onEdit,
@@ -272,6 +281,7 @@ function VocabCard({
 }: {
   w: WordTiming;
   i: number;
+  cardKey: string;
   editing: boolean;
   draft: VocabEdit;
   onEdit: () => void;
@@ -279,7 +289,7 @@ function VocabCard({
   onContext: (e: React.MouseEvent) => void;
   dragging: boolean;
   dropTarget: boolean;
-  onDragStart: () => void;
+  onDragStart: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDragEnd: () => void;
 }) {
@@ -336,6 +346,7 @@ function VocabCard({
       onContextMenu={onContext}
       title="双击编辑"
       data-card
+      data-key={cardKey}
       draggable={!editing}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
@@ -361,19 +372,31 @@ function VocabCard({
 function GrammarCard({
   g,
   i,
+  cardKey,
   editing,
   draft,
   onEdit,
   onChange,
   onContext,
+  dragging,
+  dropTarget,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
 }: {
   g: GrammarHit;
   i: number;
+  cardKey: string;
   editing: boolean;
   draft: GrammarEdit;
   onEdit: () => void;
   onChange: (v: GrammarEdit) => void;
   onContext: (e: React.MouseEvent) => void;
+  dragging: boolean;
+  dropTarget: boolean;
+  onDragStart: (e: React.DragEvent) => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragEnd: () => void;
 }) {
   if (editing) {
     const edit = draft;
@@ -404,12 +427,24 @@ function GrammarCard({
   }
   return (
     <article
-      className="vcard gcard editable"
-      style={{ animationDelay: `${i * 70}ms` }}
+      className={
+        "vcard gcard editable" +
+        (dragging ? " dragging" : "") +
+        (dropTarget ? " drop-target" : "")
+      }
+      style={{
+        animationDelay: `${i * 70}ms`,
+        transition: "transform 0.18s var(--ease-out)",
+      }}
       onDoubleClick={onEdit}
       onContextMenu={onContext}
       title="双击编辑"
       data-card
+      data-key={cardKey}
+      draggable={!editing}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDragEnd={onDragEnd}
     >
       <header className="vhead">
         <span className="vw">{g.name}</span>
@@ -469,37 +504,70 @@ export function VocabCards({
     setLocalSeg(null);
   }, [segment?.id]);
 
-  /* ---- drag to reorder (word cards only; grammar slot stays at the end) ---- */
-  const [dragId, setDragId] = useState<number | null>(null);
-  const [overId, setOverId] = useState<number | null>(null);
-  const wordIds = cards
-    .filter((c) => c.kind === "word")
-    .map((c) => c.id);
-  const previewOrder =
-    dragId !== null && overId !== null && dragId !== overId
-      ? reorderPreview(wordIds, dragId, overId)
-      : wordIds;
+  /* ---- drag to reorder (every card, FLIP-animated) ---- */
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  // first-frame positions captured before a reorder so each card can be
+  // inverted back to where it was, then released into the new slot
+  const prevRects = useRef<Map<string, number> | null>(null);
 
-  const dragPreview = previewOrder
-    .map((id) => cards.find((c) => c.kind === "word" && c.id === id))
+  const baseKeys = cards.map((c) => c.key);
+  const previewKeys =
+    dragKey !== null && overKey !== null && dragKey !== overKey
+      ? reorderPreview(baseKeys, dragKey, overKey)
+      : baseKeys;
+  const byKey = new Map(cards.map((c) => [c.key, c] as const));
+  const renderedCards: CardData[] = previewKeys
+    .map((k) => byKey.get(k))
     .filter((c): c is CardData => !!c);
 
-  const renderedCards: CardData[] =
-    dragId === null
-      ? cards
-      : [
-          ...dragPreview,
-          ...cards.filter((c) => c.kind === "grammar"),
-        ];
+  // FLIP: after React commits the reordered row, shift every moved card back
+  // to its old x and let the transition carry it into place.
+  useLayoutEffect(() => {
+    const prev = prevRects.current;
+    const row = rowRef.current;
+    prevRects.current = null;
+    if (!prev || !row) return;
+    row.querySelectorAll<HTMLElement>("[data-card]").forEach((el) => {
+      const old = prev.get(el.dataset.key ?? "");
+      if (old === undefined) return;
+      const dx = old - el.getBoundingClientRect().left;
+      if (!dx) return;
+      el.style.transition = "none";
+      el.style.transform = `translateX(${dx}px)`;
+      // force a reflow so the browser registers the inverted transform before
+      // the card is handed back to its transition
+      void el.offsetWidth;
+      el.style.transition = "";
+      el.style.transform = "";
+    });
+  }, [previewKeys]);
 
-  function onDragStart(card: CardData) {
-    if (card.kind !== "word") return;
-    setDragId(card.id);
+  function snapshotRects() {
+    const map = new Map<string, number>();
+    rowRef.current
+      ?.querySelectorAll<HTMLElement>("[data-card]")
+      .forEach((el) => {
+        map.set(el.dataset.key ?? "", el.getBoundingClientRect().left);
+      });
+    prevRects.current = map;
+  }
+
+  function onDragStart(e: React.DragEvent, card: CardData) {
+    e.dataTransfer.effectAllowed = "move";
+    // some browsers need data set for a drag to start at all
+    e.dataTransfer.setData("text/plain", card.key);
+    setDragKey(card.key);
   }
   function onDragOver(e: React.DragEvent, card: CardData) {
-    if (card.kind !== "word" || dragId === null) return;
+    if (dragKey === null || card.key === dragKey) return;
     e.preventDefault();
-    setOverId(card.id);
+    e.dataTransfer.dropEffect = "move";
+    if (card.key !== overKey) {
+      snapshotRects();
+      setOverKey(card.key);
+    }
   }
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -509,16 +577,16 @@ export function VocabCards({
     finishDrag(false);
   }
   function finishDrag(persist: boolean) {
-    const finalOrder = previewOrder;
-    setDragId(null);
-    setOverId(null);
-    if (!persist || finalOrder.join() === wordIds.join()) return;
+    const finalKeys = previewKeys;
+    setDragKey(null);
+    setOverKey(null);
+    if (!persist || finalKeys.join() === baseKeys.join()) return;
     save(
       {
         hide: ov.hide,
         replace: ov.replace,
         extra: ov.extra,
-        order: finalOrder,
+        order: finalKeys,
       },
       { remove: gov.remove, replace: gov.replace, extra: gov.extra },
     );
@@ -650,7 +718,8 @@ export function VocabCards({
         hide: [...ov.hide],
         replace: { ...ov.replace },
         extra: [...ov.extra],
-        order: [...ov.order],
+        // drop the removed card's key so the row doesn't keep a stale slot
+        order: ov.order.filter((o) => String(o) !== card.key && o !== card.id),
       };
       if (card.id >= EXTRA_BASE) {
         next.extra.splice(card.id - EXTRA_BASE, 1);
@@ -670,7 +739,15 @@ export function VocabCards({
       } else {
         next.remove.push(card.id);
       }
-      save({ hide: ov.hide, replace: ov.replace, extra: ov.extra }, next);
+      save(
+        {
+          hide: ov.hide,
+          replace: ov.replace,
+          extra: ov.extra,
+          order: ov.order.filter((o) => String(o) !== card.key),
+        },
+        next,
+      );
     }
     closeMenu();
   }
@@ -693,14 +770,9 @@ export function VocabCards({
       end: 0,
       score: 0,
     };
-    // the new card keeps the rightmost word slot; generated picks shift left
-    const wordCards = cards.filter(
-      (c): c is VocabCardData => c.kind === "word",
-    );
-    const genShown = wordCards.filter((c) => c.id < EXTRA_BASE).map((c) => c.id);
-    const extraIds = wordCards.filter((c) => c.id >= EXTRA_BASE).map((c) => c.id);
-    const newId = EXTRA_BASE + ov.extra.length;
-    const order = [...genShown, ...extraIds, newId].slice(-room);
+    // the new card keeps the rightmost slot; generated picks shift left
+    const newKey = `wx${ov.extra.length}`;
+    const order = [...cards.map((c) => c.key), newKey].slice(-budget);
     save(
       {
         hide: ov.hide,
@@ -723,18 +795,13 @@ export function VocabCards({
   function onContext(e: React.MouseEvent, card: CardData | null) {
     e.preventDefault();
     e.stopPropagation();
-    if (card?.kind === "word" && card.id >= EXTRA_BASE && card.w.text === "") {
-      // a fresh blank card is already empty — opening the editor is kinder
-      // than a delete confirm for something that has nothing to lose
-      startEdit(card);
-      return;
-    }
     setMenu({ x: e.clientX, y: e.clientY, target: card });
   }
 
   return (
     <>
       <div
+        ref={rowRef}
         className={`vocab${empty ? " empty" : ""}`}
         onContextMenu={(e) => {
           // only the padding between cards adds a new one; right-clicking a
@@ -744,8 +811,27 @@ export function VocabCards({
           onContext(e, null);
         }}
         onDragOver={(e) => {
-          // dropping on the gap between cards still counts — let it through
-          if (dragId !== null) e.preventDefault();
+          if (dragKey === null) return;
+          e.preventDefault();
+          // work out the insertion slot from the cursor x, so a drag over the
+          // gap between cards (or past the last one) still previews the move
+          const els = Array.from(
+            rowRef.current?.querySelectorAll<HTMLElement>("[data-card]") ?? [],
+          ).filter((el) => el.dataset.key !== dragKey);
+          // dragKey inserts before `target`; the sentinel keeps an end-of-row
+          // drop previewable too (it is never a real key, so it appends)
+          let target: string | null = "__END__";
+          for (const el of els) {
+            const r = el.getBoundingClientRect();
+            if (e.clientX < r.left + r.width / 2) {
+              target = el.dataset.key ?? "__END__";
+              break;
+            }
+          }
+          if (target && target !== overKey) {
+            snapshotRects();
+            setOverKey(target);
+          }
         }}
         onDrop={onDrop}
       >
@@ -755,14 +841,15 @@ export function VocabCards({
               key={card.key}
               w={card.w}
               i={i}
+              cardKey={card.key}
               editing={editingKey === card.key}
               draft={draft as VocabEdit}
               onEdit={() => startEdit(card)}
               onChange={setDraft}
               onContext={(e) => onContext(e, card)}
-              dragging={dragId === card.id}
-              dropTarget={dragId !== null && overId === card.id}
-              onDragStart={() => onDragStart(card)}
+              dragging={dragKey === card.key}
+              dropTarget={dragKey !== null && overKey === card.key}
+              onDragStart={(e) => onDragStart(e, card)}
               onDragOver={(e) => onDragOver(e, card)}
               onDragEnd={onDragEnd}
             />
@@ -771,11 +858,17 @@ export function VocabCards({
               key={card.key}
               g={card.g}
               i={i}
+              cardKey={card.key}
               editing={editingKey === card.key}
               draft={draft as GrammarEdit}
               onEdit={() => startEdit(card)}
               onChange={setDraft}
               onContext={(e) => onContext(e, card)}
+              dragging={dragKey === card.key}
+              dropTarget={dragKey !== null && overKey === card.key}
+              onDragStart={(e) => onDragStart(e, card)}
+              onDragOver={(e) => onDragOver(e, card)}
+              onDragEnd={onDragEnd}
             />
           ),
         )}

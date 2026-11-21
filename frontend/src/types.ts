@@ -49,8 +49,10 @@ export interface Segment {
     /** per generated word index: replacement fields */
     replace?: Record<number, Partial<WordTiming>>;
     extra?: WordTiming[];
-    /** display order of all word cards: generated indexes + EXTRA_BASE+i */
-    order?: number[];
+    /** display order of all cards (word + grammar), stored as card keys:
+        `w${index}` / `wx${i}` for words, `g-${id}` / `gx${i}` for grammar.
+        Legacy saves may hold generated word indexes (numbers) instead. */
+    order?: Array<number | string>;
   } | null;
   /** stage edits: replacements + hand-made grammar cards */
   grammar_extra?: {
