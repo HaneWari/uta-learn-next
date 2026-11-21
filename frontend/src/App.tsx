@@ -24,7 +24,7 @@ export default function App() {
   const [exportNote, setExportNote] = useState<string | null>(null);
   const [background, setBackground] = useState<StageBackground>(DEFAULT_BG);
   const [bgOpen, setBgOpen] = useState(false);
-  const { songData, error, loading } = useSongData(song);
+  const { songData, error, loading, patch: patchSegment } = useSongData(song);
 
   const refresh = useCallback(() => {
     api.songs().then(setSongs).catch(() => setSongs([]));
@@ -225,6 +225,7 @@ export default function App() {
             song={song}
             hasAudio={current?.has_audio}
             background={background}
+            onPatchSegment={patchSegment}
           />
         )}
       </div>

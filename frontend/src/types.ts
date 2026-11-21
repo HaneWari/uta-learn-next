@@ -43,6 +43,21 @@ export interface Segment {
   gloss_en?: string;
   grammar?: GrammarHit[];
   words: WordTiming[];
+  /** stage edits: which word indexes get a card, and hand-made extra cards */
+  vocab_override?: {
+    hide?: number[];
+    /** per generated word index: replacement fields */
+    replace?: Record<number, Partial<WordTiming>>;
+    extra?: WordTiming[];
+    /** display order of all word cards: generated indexes + EXTRA_BASE+i */
+    order?: number[];
+  } | null;
+  /** stage edits: replacements + hand-made grammar cards */
+  grammar_extra?: {
+    remove?: string[];   // grammar ids to hide
+    replace?: Record<string, Partial<GrammarHit>>;
+    extra?: GrammarHit[];
+  } | null;
 }
 
 export interface SongMeta {

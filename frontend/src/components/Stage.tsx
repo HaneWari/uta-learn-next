@@ -1,5 +1,5 @@
 import { useRef, useEffect, useCallback } from "react";
-import type { SongData, StageBackground } from "../types";
+import type { Segment, SongData, StageBackground } from "../types";
 import { useSyncEngine } from "../hooks/useSyncEngine";
 import { Player } from "./Player";
 import { LyricsDisplay } from "./LyricsDisplay";
@@ -16,9 +16,14 @@ interface Props {
   hasAudio?: boolean;
   /** paper theme, or the user's own image behind the stage */
   background?: StageBackground;
+  /** persist card edits (disabled in render mode) */
+  onPatchSegment?: (
+    segId: number,
+    body: Partial<Segment>,
+  ) => Segment | undefined;
 }
 
-export function Stage({ songData, song, render = false, hasAudio, background }: Props) {
+export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const { syncState, clockRef } = useSyncEngine(songData, audioRef);
   const audioSrc = `/api/audio/${encodeURIComponent(song)}`;
@@ -94,7 +99,18 @@ export function Stage({ songData, song, render = false, hasAudio, background }: 
           audioRef={audioRef}
           clockRef={clockRef}
         />
-        <VocabCards segment={songData.segments[syncState.displayIndex] ?? null} />
+        <VocabCards
+          segment={songData.segments[syncState.displayIndex] ?? null}
+          onPatch={
+            render || !onPatchSegment
+              ? undefined
+              : (patch) =>
+                  onPatchSegment(
+                    songData.segments[syncState.displayIndex].id,
+                    patch,
+                  )
+          }
+        />
       </main>
 
       <div className="curtain" aria-hidden={!syncState.outro}>

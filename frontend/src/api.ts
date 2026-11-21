@@ -85,6 +85,14 @@ export const api = {
       method: "DELETE",
     }).then((r) => json<{ deleted: string }>(r)),
 
+  /* persist card edits for one segment of a dataset */
+  patchSong: (name: string, patch: { id: number } & Record<string, unknown>) =>
+    fetch(`${BASE}/api/songs/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    }).then((r) => json<Record<string, unknown>>(r)),
+
   /* stage background: stored server-side so the export sees it too */
   background: () =>
     fetch(`${BASE}/api/ui/background`).then((r) => json<StageBackground>(r)),

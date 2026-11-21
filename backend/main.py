@@ -542,6 +542,44 @@ def api_delete_song(name: str):
     return {"deleted": name}
 
 
+_WRITABLE_KEYS = {"id", "vocab_override", "grammar_extra"}
+
+
+@app.patch("/api/songs/{name}")
+def api_patch_song(name: str, patch: dict):
+    """Persist card edits made on the stage.
+
+    The payload is a partial `Segment` — only `vocab_override` and
+    `grammar_extra` are writable through this route; everything else (text,
+    timings, grammar) is derived data and stays authoritative.
+    """
+    bad = set(patch.keys()) - _WRITABLE_KEYS
+    if bad:
+        raise HTTPException(status_code=400, detail=f"只读字段: {sorted(bad)}")
+    if "id" not in patch:
+        raise HTTPException(status_code=400, detail="缺少 segment id")
+
+    path = dataset(name) / "song_data.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="song_data.json missing")
+    data = json.loads(path.read_text(encoding="utf-8"))
+
+    for seg in data.get("segments", []):
+        if seg.get("id") != patch["id"]:
+            continue
+        for key in ("vocab_override", "grammar_extra"):
+            if key in patch:
+                if patch[key] is None:
+                    seg.pop(key, None)
+                else:
+                    seg[key] = patch[key]
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                        encoding="utf-8")
+        return seg
+
+    raise HTTPException(status_code=404, detail="segment not found")
+
+
 # --------------------------------------------------------------------------- #
 # video export
 # --------------------------------------------------------------------------- #

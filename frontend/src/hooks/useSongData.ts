@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
-import type { SongData } from "../types";
+import { useCallback } from "react";
+import type { Segment, SongData } from "../types";
+import { api } from "../api";
 
 /** Load one dataset by name; `null` clears it. */
 export function useSongData(song: string | null) {
@@ -38,5 +40,28 @@ export function useSongData(song: string | null) {
     };
   }, [song]);
 
-  return { songData, error, loading };
+  /** Persist card edits for one segment; applies optimistically. */
+  const patch = useCallback(
+    (segId: number, body: Partial<Segment>): Segment | undefined => {
+      if (!song) return;
+      let updated: Segment | undefined;
+      setSongData((prev) => {
+        if (!prev) return prev;
+        const next = {
+          ...prev,
+          segments: prev.segments.map((s) =>
+            s.id === segId ? ((updated = { ...s, ...body }), updated) : s,
+          ),
+        };
+        return next;
+      });
+      api.patchSong(song, { id: segId, ...body }).catch(() => {
+        /* keep the optimistic state; next full reload re-reads the file */
+      });
+      return updated;
+    },
+    [song],
+  );
+
+  return { songData, error, loading, patch };
 }
