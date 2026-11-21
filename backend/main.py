@@ -639,6 +639,9 @@ async def api_export(payload: dict):
     safe = re.sub(r"[^\w.\-]+", "-", name)[:60]
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out = EXPORT_DIR / f"{safe}-{stamp}.mp4"
+    # the recorder opens a fresh browser profile that can't see the user's
+    # localStorage — the hidden-cards flag has to be carried in the page URL
+    hide_cards = bool(payload.get("hide_cards"))
 
     ok, why = export.available()
     if not ok:
@@ -654,6 +657,7 @@ async def api_export(payload: dict):
             out=out,
             duration=duration,
             progress=progress,
+            extra_query="&hidecards=1" if hide_cards else "",
         )
         return {"file": out.name, "url": f"/api/exports/{out.name}",
                 "size": out.stat().st_size, "duration": duration,

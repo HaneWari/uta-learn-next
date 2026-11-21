@@ -1117,7 +1117,10 @@ body {
   --vgap: clamp(12px, 1.3vw, 22px);
   gap: var(--vgap);
   min-height: 0;
-  padding-top: clamp(10px, 1.6vh, 20px);
+  /* generous padding on every side: with a full 4-card row there is no free
+     gap between cards, so the pad around the first/last card and above/below
+     the row is part of the right-click zone (see also the bleed below) */
+  padding: clamp(10px, 1.6vh, 20px) clamp(28px, 4vw, 64px) clamp(12px, 1.8vh, 22px);
   /* never wrap: a second row would push the lyric line up */
   flex-wrap: nowrap;
 }
@@ -1147,6 +1150,12 @@ body {
 .vocab-collapsed-bar:hover {
   color: var(--coral);
   border-color: var(--coral);
+}
+
+/* the export page hides the whole collapsed bar: no card, no hint text may
+   appear in the recorded video */
+.render-mode .vocab.collapsed {
+  display: none;
 }
 
 .vcard {
@@ -1432,11 +1441,21 @@ body {
   cursor: default;
 }
 
+/* while a line is being edited the block takes the full row width so the edit
+   inputs are not squeezed to the lyric's own footprint */
+.cur-block:has(.lyr-edit) {
+  width: 100%;
+  align-self: stretch;
+}
+
 .lyr-edit {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  width: min(88%, 720px);
+  gap: 14px;
+  /* .cur-block centers its items, which would shrink this to its content; stretch
+     instead so the edit row actually uses the width we ask for */
+  align-self: stretch;
+  width: min(96%, 1100px);
   margin: 0 auto;
 }
 
@@ -1448,8 +1467,8 @@ body {
   color: inherit;
   background: rgba(255, 253, 248, 0.9);
   border: 1px solid rgba(178, 146, 116, 0.55);
-  border-radius: 10px;
-  padding: 10px 16px;
+  border-radius: 12px;
+  padding: 18px 24px;
   outline: none;
 }
 
@@ -1459,12 +1478,12 @@ body {
 }
 
 .lyr-edit-text {
-  font-size: clamp(20px, 2vw, 30px);
+  font-size: clamp(24px, 2.4vw, 38px);
   font-weight: 600;
 }
 
 .lyr-edit-zh {
-  font-size: clamp(15px, 1.15vw, 19px);
+  font-size: clamp(18px, 1.5vw, 26px);
   color: var(--ink-soft, #8a7458);
 }
 

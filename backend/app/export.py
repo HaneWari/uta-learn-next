@@ -223,7 +223,7 @@ def _mux(raw: Path, audio: Path | None, out: Path, duration: float,
 
 
 def render(base_url: str, song: str, audio: Path | None, out: Path,
-           duration: float, progress=None) -> Path:
+           duration: float, progress=None, extra_query: str = "") -> Path:
     """Record `?song=<song>&render=1` and write `out` as 60 fps H.264 + AAC."""
     from playwright.sync_api import sync_playwright
 
@@ -234,7 +234,7 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
 
     out.parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="utaexport_"))
-    url = f"{base_url}/?song={song}&render=1"
+    url = f"{base_url}/?song={song}&render=1{extra_query}"
 
     try:
         p(0.02, "启动浏览器…")

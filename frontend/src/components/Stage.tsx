@@ -28,7 +28,13 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
   // song-wide card visibility, remembered per dataset so a listener who only
   // wants the lyrics can switch the vocab row off (and the export matches)
   const [cardsHidden, setCardsHidden] = useState(
-    () => localStorage.getItem(`hideCards:${song}`) === "1",
+    () => {
+      // the video-export page carries the flag in its URL because the headless
+      // recorder runs a fresh browser profile with no localStorage of ours
+      const q = new URLSearchParams(window.location.search).get("hidecards");
+      if (q !== null) return q === "1";
+      return localStorage.getItem(`hideCards:${song}`) === "1";
+    },
   );
   const toggleCards = useCallback(() => {
     setCardsHidden((h) => {
@@ -117,20 +123,24 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
           clockRef={clockRef}
           onPatch={render ? undefined : onPatchSegment}
         />
-        <VocabCards
-          segment={visibleSegments[syncState.displayIndex] ?? null}
-          hidden={cardsHidden}
-          onToggleHidden={toggleCards}
-          onPatch={
-            render || !onPatchSegment
-              ? undefined
-              : (patch) =>
-                  onPatchSegment(
-                    visibleSegments[syncState.displayIndex].id,
-                    patch,
-                  )
-          }
-        />
+        {/* the export recorder must never carry the collapsed bar, so the
+            whole row is unmounted in render mode when cards are hidden */}
+        {!(render && cardsHidden) && (
+          <VocabCards
+            segment={visibleSegments[syncState.displayIndex] ?? null}
+            hidden={cardsHidden}
+            onToggleHidden={toggleCards}
+            onPatch={
+              render || !onPatchSegment
+                ? undefined
+                : (patch) =>
+                    onPatchSegment(
+                      visibleSegments[syncState.displayIndex].id,
+                      patch,
+                    )
+            }
+          />
+        )}
       </main>
 
       <div className="curtain" aria-hidden={!syncState.outro}>

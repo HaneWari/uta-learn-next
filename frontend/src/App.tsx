@@ -63,7 +63,11 @@ export default function App() {
     setExportPct(0);
     setExportNote(null);
     try {
-      const { job_id } = await api.startExport(song);
+      // the hidden-cards flag has to reach the recorder page: its fresh
+      // browser profile can't see our localStorage, so it goes in the URL
+      const hideCards =
+        localStorage.getItem(`hideCards:${song}`) === "1";
+      const { job_id } = await api.startExport(song, hideCards);
       const job = await waitForJob(
         job_id,
         (j) => setExportPct(Math.round(j.progress * 100)),

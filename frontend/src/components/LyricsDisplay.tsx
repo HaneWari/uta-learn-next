@@ -162,15 +162,48 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
     setEditing(true);
   }
 
+  // Enter commits from anywhere while editing — not just when a field is
+  // focused — and a click on empty space saves too. Esc cancels.
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        commitEdit();
+      }
+      if (e.key === "Escape") setEditing(false);
+    };
+    const onDown = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest(".lyr-edit")) return;
+      commitEdit();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDown);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, draft, cur]);
+
   function commitEdit() {
     if (cur && onPatch) {
+      const newText = draft.text.trim();
+      const newZh = draft.zh.trim();
+      // Only a real text change rewrites `lyric_override.text`: entering edit
+      // mode and leaving, or touching just the translation, must keep the
+      // per-glyph wipe (it still matches the words). A changed text is what
+      // drops the highlight onto the verbatim line.
+      const textChanged = newText !== (cur.lyric_override?.text ?? cur.text);
+      const prevZh = cur.lyric_override?.translation_zh;
+      const zhChanged = newZh !== (prevZh ?? cur.translation_zh ?? "");
       onPatch(cur.id, {
         // an emptied line still plays on its timing — it just shows nothing
         lyric_override: {
-          text: draft.text.trim(),
-          // "" is a real value here — undefined would fall back to the raw
-          // translation via `??` and the line could never be cleared
-          translation_zh: draft.zh.trim(),
+          // keep the old override text when it wasn't edited, and never
+          // introduce `text` on a translation-only edit
+          text: textChanged ? newText : cur.lyric_override?.text,
+          translation_zh: zhChanged ? newZh : prevZh,
         },
       });
     }
@@ -237,22 +270,14 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
               placeholder="日文歌词"
               autoFocus
               onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitEdit();
-                if (e.key === "Escape") setEditing(false);
-              }}
             />
             <input
               className="lyr-edit-zh"
               value={draft.zh}
               placeholder="中文翻译（可留空）"
               onChange={(e) => setDraft({ ...draft, zh: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") commitEdit();
-                if (e.key === "Escape") setEditing(false);
-              }}
             />
-            <span className="lyr-edit-hint">回车保存 · Esc 取消</span>
+            <span className="lyr-edit-hint">回车或点击空白保存 · Esc 取消</span>
           </div>
         ) : (
           <>

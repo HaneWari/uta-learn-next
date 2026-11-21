@@ -810,6 +810,37 @@ export function VocabCards({
     setMenu({ x: e.clientX, y: e.clientY, target: card });
   }
 
+  // the row's own element can only catch right-clicks inside its (clipped) box,
+  // but the spec asks for a much wider zone — the whole strip from just under
+  // the lyric down to just above the transport, edge to edge. Listen at the
+  // document and open the same menu when the click lands inside that bleed.
+  useEffect(() => {
+    const BLEED_TOP = 120;   // up toward the lyric line
+    const BLEED_BOTTOM = 96; // down toward the transport bar
+    const onDocContext = (e: MouseEvent) => {
+      const row = rowRef.current;
+      if (!row) return;
+      // a right-click on a card or inside an already-open menu keeps its own
+      // behaviour
+      const t = e.target as HTMLElement;
+      if (t.closest("[data-card]") || t.closest(".ctx-menu")) return;
+      const r = row.getBoundingClientRect();
+      const inBand =
+        e.clientX >= r.left &&
+        e.clientX <= r.right &&
+        e.clientY >= r.top - BLEED_TOP &&
+        e.clientY <= r.bottom + BLEED_BOTTOM;
+      if (!inBand) return;
+      // already inside the row box? the row's own handler fires too — bail so
+      // we don't set the menu twice
+      if (e.clientY >= r.top && e.clientY <= r.bottom) return;
+      e.preventDefault();
+      setMenu({ x: e.clientX, y: e.clientY, target: null });
+    };
+    document.addEventListener("contextmenu", onDocContext);
+    return () => document.removeEventListener("contextmenu", onDocContext);
+  }, []);
+
   return (
     <>
       <div

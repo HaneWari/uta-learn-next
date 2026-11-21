@@ -77,8 +77,14 @@ export const api = {
       json<{ file: string; size: number; created: number; url: string }[]>(r),
     ),
 
-  startExport: (song: string) =>
-    post<{ job_id: string; file: string }>("/api/export", { song }),
+  // `hideCards` rides along so the headless recorder page (a fresh browser
+  // profile that can't see this window's localStorage) hides the vocab row
+  // exactly like the stage the user is looking at.
+  startExport: (song: string, hideCards = false) =>
+    post<{ job_id: string; file: string }>("/api/export", {
+      song,
+      hide_cards: hideCards,
+    }),
 
   remove: (name: string) =>
     fetch(`${BASE}/api/songs/${encodeURIComponent(name)}`, {
