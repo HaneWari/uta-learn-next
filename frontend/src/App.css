@@ -1399,6 +1399,55 @@ body {
   font-size: 13.5px;
 }
 
+/* ---------- lyric line editing ---------- */
+
+.cur-block {
+  cursor: default;
+}
+
+.lyr-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(88%, 720px);
+  margin: 0 auto;
+}
+
+.lyr-edit input {
+  width: 100%;
+  font: inherit;
+  font-family: var(--serif);
+  text-align: center;
+  color: inherit;
+  background: rgba(255, 253, 248, 0.9);
+  border: 1px solid rgba(178, 146, 116, 0.55);
+  border-radius: 10px;
+  padding: 10px 16px;
+  outline: none;
+}
+
+.lyr-edit input:focus {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.2);
+}
+
+.lyr-edit-text {
+  font-size: clamp(20px, 2vw, 30px);
+  font-weight: 600;
+}
+
+.lyr-edit-zh {
+  font-size: clamp(15px, 1.15vw, 19px);
+  color: var(--ink-soft, #8a7458);
+}
+
+.lyr-edit-hint {
+  font-size: 12px;
+  color: #b39a7a;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
 .ctx-menu {
   position: fixed;
   z-index: 60;

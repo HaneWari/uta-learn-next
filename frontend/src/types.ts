@@ -41,6 +41,9 @@ export interface Segment {
   romaji: string;
   translation_zh?: string;
   gloss_en?: string;
+  /** user hid this lyric line — it stays in the dataset but is skipped on
+      stage and in the video export */
+  hidden?: boolean;
   grammar?: GrammarHit[];
   words: WordTiming[];
   /** stage edits: which word indexes get a card, and hand-made extra cards */

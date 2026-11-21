@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, RefObject } from "react";
 import type { Segment, WordTiming } from "../types";
 import type { SyncState } from "../hooks/useSyncEngine";
@@ -10,6 +10,8 @@ interface LyricsDisplayProps {
   audioRef: RefObject<HTMLAudioElement | null>;
   /** timeline position when the dataset has no audio element */
   clockRef: RefObject<number>;
+  /** stage edits: save a corrected line or hide it (disabled in render mode) */
+  onPatch?: (segId: number, body: Partial<Segment>) => Segment | undefined;
 }
 
 /**
@@ -126,10 +128,55 @@ function NextLine({ segment }: { segment: Segment }) {
   );
 }
 
-export function LyricsDisplay({ segments, syncState, audioRef, clockRef }: LyricsDisplayProps) {
+export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch }: LyricsDisplayProps) {
   const activeRef = useRef<HTMLSpanElement | null>(null);
   const cur = segments[syncState.displayIndex];
   const next = segments[syncState.displayIndex + 1] ?? null;
+
+  /* ---- lyric editing: double-click to fix the line, right-click to hide it.
+     Only the sung text and its Chinese gloss are editable — romaji and the
+     word timings come from alignment and are left alone. ---- */
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ text: "", zh: "" });
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+
+  // a new line scrolls in — drop any half-finished edit so it can't leak
+  // onto the next segment
+  useEffect(() => {
+    setEditing(false);
+    setMenu(null);
+  }, [cur?.id]);
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest(".ctx-menu")) return;
+      setMenu(null);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [menu]);
+
+  function startEdit() {
+    if (!cur || !onPatch) return;
+    setDraft({ text: cur.text, zh: cur.translation_zh ?? "" });
+    setEditing(true);
+  }
+
+  function commitEdit() {
+    if (cur && onPatch) {
+      onPatch(cur.id, {
+        text: draft.text.trim() || cur.text,
+        translation_zh: draft.zh.trim() || undefined,
+      });
+    }
+    setEditing(false);
+  }
+
+  function removeLine() {
+    if (cur && onPatch) onPatch(cur.id, { hidden: true });
+    setMenu(null);
+  }
 
   // drive the fill of the single active glyph, nothing else re-renders
   useEffect(() => {
@@ -181,21 +228,73 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef }: Lyric
         style={{
           "--chars": cur.text.replace(/\s/g, "").length || 1,
         } as CSSProperties}
+        onDoubleClick={startEdit}
+        onContextMenu={(e) => {
+          if (!onPatch) return;
+          e.preventDefault();
+          setMenu({ x: e.clientX, y: e.clientY });
+        }}
       >
-        <div className="cur-line">
-          {cur.words.map((w, i) => (
-            <WordView
-              key={i}
-              word={w}
-              segmentId={cur.id}
-              wordIndex={i}
-              syncState={syncState}
-              activeRef={activeRef}
+        {editing ? (
+          <div className="lyr-edit">
+            <input
+              className="lyr-edit-text"
+              value={draft.text}
+              placeholder="日文歌词"
+              autoFocus
+              onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitEdit();
+                if (e.key === "Escape") setEditing(false);
+              }}
             />
-          ))}
-        </div>
-        {cur.translation_zh && <div className="zh-line">{cur.translation_zh}</div>}
+            <input
+              className="lyr-edit-zh"
+              value={draft.zh}
+              placeholder="中文翻译（可留空）"
+              onChange={(e) => setDraft({ ...draft, zh: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitEdit();
+                if (e.key === "Escape") setEditing(false);
+              }}
+            />
+            <span className="lyr-edit-hint">回车保存 · Esc 取消</span>
+          </div>
+        ) : (
+          <>
+            <div className="cur-line">
+              {cur.words.map((w, i) => (
+                <WordView
+                  key={i}
+                  word={w}
+                  segmentId={cur.id}
+                  wordIndex={i}
+                  syncState={syncState}
+                  activeRef={activeRef}
+                />
+              ))}
+            </div>
+            {cur.translation_zh && <div className="zh-line">{cur.translation_zh}</div>}
+          </>
+        )}
       </div>
+
+      {menu && (
+        <div
+          className="ctx-menu"
+          style={{ left: menu.x, top: menu.y }}
+          role="menu"
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div className="ctx-hint">删除这句歌词？</div>
+          <button className="ctx-item danger" onClick={removeLine}>
+            删除这句歌词
+          </button>
+          <button className="ctx-item dim" onClick={() => setMenu(null)}>
+            取消
+          </button>
+        </div>
+      )}
     </div>
   );
 }

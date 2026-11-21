@@ -706,7 +706,14 @@ export function VocabCards({
         next.replace[card.id] = { name: e.name, level: e.level, z: e.z, ex: e.ex };
       }
       save(
-        { hide: ov.hide, replace: ov.replace, extra: ov.extra },
+        {
+          hide: ov.hide,
+          replace: ov.replace,
+          extra: ov.extra,
+          // keep the row order — dropping it reset every grammar card to the
+          // tail of the row after any edit
+          order: ov.order,
+        },
         next,
       );
     }

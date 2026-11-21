@@ -25,7 +25,12 @@ interface Props {
 
 export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
-  const { syncState, clockRef } = useSyncEngine(songData, audioRef);
+  // hidden lines are left in the dataset but skipped everywhere the timeline
+  // is consumed — the sync engine, the lyric display and the vocab row all
+  // see the same filtered segment list, so a removed line just never plays.
+  const visibleSegments = songData.segments.filter((s) => !s.hidden);
+  const visibleData: SongData = { ...songData, segments: visibleSegments };
+  const { syncState, clockRef } = useSyncEngine(visibleData, audioRef);
   const audioSrc = `/api/audio/${encodeURIComponent(song)}`;
   const custom = background?.mode === "custom" && !!background.url;
   // The dataset's own flag wins; otherwise use the list endpoint's answer, and
@@ -94,19 +99,20 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
 
       <main className="main">
         <LyricsDisplay
-          segments={songData.segments}
+          segments={visibleSegments}
           syncState={syncState}
           audioRef={audioRef}
           clockRef={clockRef}
+          onPatch={render ? undefined : onPatchSegment}
         />
         <VocabCards
-          segment={songData.segments[syncState.displayIndex] ?? null}
+          segment={visibleSegments[syncState.displayIndex] ?? null}
           onPatch={
             render || !onPatchSegment
               ? undefined
               : (patch) =>
                   onPatchSegment(
-                    songData.segments[syncState.displayIndex].id,
+                    visibleSegments[syncState.displayIndex].id,
                     patch,
                   )
           }

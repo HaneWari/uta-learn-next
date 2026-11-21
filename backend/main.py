@@ -542,7 +542,16 @@ def api_delete_song(name: str):
     return {"deleted": name}
 
 
-_WRITABLE_KEYS = {"id", "vocab_override", "grammar_extra"}
+_WRITABLE_KEYS = {
+    "id",
+    "vocab_override",
+    "grammar_extra",
+    # stage-side lyric edits: the sung text, its Chinese gloss, and a hidden
+    # flag (a hidden line is skipped on stage and in the export)
+    "text",
+    "translation_zh",
+    "hidden",
+}
 
 
 @app.patch("/api/songs/{name}")
@@ -567,7 +576,7 @@ def api_patch_song(name: str, patch: dict):
     for seg in data.get("segments", []):
         if seg.get("id") != patch["id"]:
             continue
-        for key in ("vocab_override", "grammar_extra"):
+        for key in _WRITABLE_KEYS - {"id"}:
             if key in patch:
                 if patch[key] is None:
                     seg.pop(key, None)
