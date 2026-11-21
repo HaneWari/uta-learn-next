@@ -546,10 +546,10 @@ _WRITABLE_KEYS = {
     "id",
     "vocab_override",
     "grammar_extra",
-    # stage-side lyric edits: the sung text, its Chinese gloss, and a hidden
-    # flag (a hidden line is skipped on stage and in the export)
-    "text",
-    "translation_zh",
+    # stage-side lyric edits live in `lyric_override` (never overwrite the raw
+    # `text`/`translation_zh`, so a cleared line can always be restored);
+    # `hidden` skips a line entirely
+    "lyric_override",
     "hidden",
 }
 

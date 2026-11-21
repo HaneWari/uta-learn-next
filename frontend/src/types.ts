@@ -44,6 +44,12 @@ export interface Segment {
   /** user hid this lyric line — it stays in the dataset but is skipped on
       stage and in the video export */
   hidden?: boolean;
+  /** stage edits to the sung line + its Chinese gloss, layered over the raw
+      text so clearing a field never destroys the aligned original */
+  lyric_override?: {
+    text?: string;
+    translation_zh?: string;
+  } | null;
   grammar?: GrammarHit[];
   words: WordTiming[];
   /** stage edits: which word indexes get a card, and hand-made extra cards */

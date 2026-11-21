@@ -1,4 +1,4 @@
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import type { Segment, SongData, StageBackground } from "../types";
 import { useSyncEngine } from "../hooks/useSyncEngine";
 import { Player } from "./Player";
@@ -25,6 +25,18 @@ interface Props {
 
 export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
+  // song-wide card visibility, remembered per dataset so a listener who only
+  // wants the lyrics can switch the vocab row off (and the export matches)
+  const [cardsHidden, setCardsHidden] = useState(
+    () => localStorage.getItem(`hideCards:${song}`) === "1",
+  );
+  const toggleCards = useCallback(() => {
+    setCardsHidden((h) => {
+      const next = !h;
+      localStorage.setItem(`hideCards:${song}`, next ? "1" : "0");
+      return next;
+    });
+  }, [song]);
   // hidden lines are left in the dataset but skipped everywhere the timeline
   // is consumed — the sync engine, the lyric display and the vocab row all
   // see the same filtered segment list, so a removed line just never plays.
@@ -107,6 +119,8 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
         />
         <VocabCards
           segment={visibleSegments[syncState.displayIndex] ?? null}
+          hidden={cardsHidden}
+          onToggleHidden={toggleCards}
           onPatch={
             render || !onPatchSegment
               ? undefined

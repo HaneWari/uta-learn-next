@@ -1122,6 +1122,33 @@ body {
   flex-wrap: nowrap;
 }
 
+/* whole-song collapse: the row shrinks to a slim bar but stays right-clickable
+   so the listener can bring the cards back */
+.vocab.collapsed {
+  min-height: 0;
+  padding-top: 0;
+}
+
+.vocab-collapsed-bar {
+  align-self: center;
+  font: inherit;
+  font-family: var(--serif);
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: #b39a7a;
+  background: transparent;
+  border: 1px dashed rgba(178, 146, 116, 0.5);
+  border-radius: 999px;
+  padding: 6px 20px;
+  cursor: context-menu;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.vocab-collapsed-bar:hover {
+  color: var(--coral);
+  border-color: var(--coral);
+}
+
 .vcard {
   /* Fixed 4-up width: identical whether the row holds 1, 2, 3 or 4 cards, and
      never wraps. Previously `flex: 1 1 0` + a 50% media query made four cards
@@ -1446,6 +1473,28 @@ body {
   color: #b39a7a;
   text-align: center;
   letter-spacing: 0.04em;
+}
+
+/* a hand-edited lyric line: same footprint as the per-glyph surface, shown
+   verbatim since the word timings no longer describe it */
+.cur-line-text {
+  display: inline-block;
+  font-family: var(--serif);
+  font-weight: 600;
+  color: var(--ink);
+  font-size: min(clamp(26px, 3.6vw, 66px), calc(94vw / var(--chars, 12)));
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+
+/* a lyric the listener cleared: keep a faint placeholder so the slot is still
+   double-clickable (otherwise the line could never be restored) */
+.cur-line-empty {
+  display: inline-block;
+  color: rgba(150, 122, 88, 0.4);
+  font-size: clamp(20px, 2vw, 30px);
+  letter-spacing: 0.3em;
+  cursor: default;
 }
 
 .ctx-menu {

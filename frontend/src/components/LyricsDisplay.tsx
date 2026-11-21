@@ -14,6 +14,17 @@ interface LyricsDisplayProps {
   onPatch?: (segId: number, body: Partial<Segment>) => Segment | undefined;
 }
 
+/** The text the listener actually sees: the override wins over the aligned
+    original, and an emptied override hides the line's text without deleting
+    the underlying words. */
+function shownText(seg: Segment): string {
+  return seg.lyric_override?.text ?? seg.text ?? "";
+}
+
+function shownZh(seg: Segment): string | undefined {
+  return seg.lyric_override?.translation_zh ?? seg.translation_zh;
+}
+
 /**
  * Highlight unit is the character, not the word — the same model LDDC uses
  * (`LyricsWord(start, end, text)`): every glyph has its own start/end, so the
@@ -138,44 +149,32 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
      word timings come from alignment and are left alone. ---- */
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ text: "", zh: "" });
-  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
 
   // a new line scrolls in — drop any half-finished edit so it can't leak
   // onto the next segment
   useEffect(() => {
     setEditing(false);
-    setMenu(null);
   }, [cur?.id]);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest(".ctx-menu")) return;
-      setMenu(null);
-    };
-    window.addEventListener("mousedown", close);
-    return () => window.removeEventListener("mousedown", close);
-  }, [menu]);
 
   function startEdit() {
     if (!cur || !onPatch) return;
-    setDraft({ text: cur.text, zh: cur.translation_zh ?? "" });
+    setDraft({ text: shownText(cur), zh: shownZh(cur) ?? "" });
     setEditing(true);
   }
 
   function commitEdit() {
     if (cur && onPatch) {
       onPatch(cur.id, {
-        text: draft.text.trim() || cur.text,
-        translation_zh: draft.zh.trim() || undefined,
+        // an emptied line still plays on its timing — it just shows nothing
+        lyric_override: {
+          text: draft.text.trim(),
+          // "" is a real value here — undefined would fall back to the raw
+          // translation via `??` and the line could never be cleared
+          translation_zh: draft.zh.trim(),
+        },
       });
     }
     setEditing(false);
-  }
-
-  function removeLine() {
-    if (cur && onPatch) onPatch(cur.id, { hidden: true });
-    setMenu(null);
   }
 
   // drive the fill of the single active glyph, nothing else re-renders
@@ -213,7 +212,7 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
             {next.words.length ? (
               <NextLine segment={next} />
             ) : (
-              <span className="next-line">{next.text}</span>
+              <span className="next-line">{shownText(next)}</span>
             )}
             <span className="next-romaji">{next.romaji}</span>
           </div>
@@ -226,14 +225,9 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
         className="cur-block"
         key={`c-${cur.id}`}
         style={{
-          "--chars": cur.text.replace(/\s/g, "").length || 1,
+          "--chars": shownText(cur).replace(/\s/g, "").length || 1,
         } as CSSProperties}
         onDoubleClick={startEdit}
-        onContextMenu={(e) => {
-          if (!onPatch) return;
-          e.preventDefault();
-          setMenu({ x: e.clientX, y: e.clientY });
-        }}
       >
         {editing ? (
           <div className="lyr-edit">
@@ -262,39 +256,40 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
           </div>
         ) : (
           <>
-            <div className="cur-line">
-              {cur.words.map((w, i) => (
-                <WordView
-                  key={i}
-                  word={w}
-                  segmentId={cur.id}
-                  wordIndex={i}
-                  syncState={syncState}
-                  activeRef={activeRef}
-                />
-              ))}
-            </div>
-            {cur.translation_zh && <div className="zh-line">{cur.translation_zh}</div>}
+            {/* a cleared lyric keeps its timing but shows no text or wipe */}
+            {shownText(cur).trim() === "" ? (
+              // empty by the listener's own edit — keep a faint, still
+              // double-clickable placeholder so the line can be brought back
+              onPatch && (
+                <span className="cur-line-empty" title="双击恢复歌词">
+                  ···
+                </span>
+              )
+            ) : (
+              <div className="cur-line">
+                {cur.lyric_override?.text != null ? (
+                  // a hand-edited line no longer matches the word timings —
+                  // show the corrected text verbatim instead of the stale
+                  // per-glyph wipe
+                  <span className="cur-line-text">{shownText(cur)}</span>
+                ) : (
+                  cur.words.map((w, i) => (
+                    <WordView
+                      key={i}
+                      word={w}
+                      segmentId={cur.id}
+                      wordIndex={i}
+                      syncState={syncState}
+                      activeRef={activeRef}
+                    />
+                  ))
+                )}
+              </div>
+            )}
+            {shownZh(cur) && <div className="zh-line">{shownZh(cur)}</div>}
           </>
         )}
       </div>
-
-      {menu && (
-        <div
-          className="ctx-menu"
-          style={{ left: menu.x, top: menu.y }}
-          role="menu"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="ctx-hint">删除这句歌词？</div>
-          <button className="ctx-item danger" onClick={removeLine}>
-            删除这句歌词
-          </button>
-          <button className="ctx-item dim" onClick={() => setMenu(null)}>
-            取消
-          </button>
-        </div>
-      )}
     </div>
   );
 }

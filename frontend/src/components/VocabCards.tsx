@@ -478,12 +478,17 @@ interface MenuState {
 export function VocabCards({
   segment,
   onPatch,
+  hidden = false,
+  onToggleHidden,
 }: {
   segment: Segment | null;
   onPatch?: (patch: {
     vocab_override?: Segment["vocab_override"];
     grammar_extra?: Segment["grammar_extra"];
   }) => Segment | undefined;
+  /** whole-song toggle: collapse the row to a slim bar (still right-clickable) */
+  hidden?: boolean;
+  onToggleHidden?: () => void;
 }) {
   const budget = useCardBudget();
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -809,7 +814,7 @@ export function VocabCards({
     <>
       <div
         ref={rowRef}
-        className={`vocab${empty ? " empty" : ""}`}
+        className={`vocab${empty ? " empty" : ""}${hidden ? " collapsed" : ""}`}
         onContextMenu={(e) => {
           // only the padding between cards adds a new one; right-clicking a
           // card opens its own menu instead
@@ -842,7 +847,20 @@ export function VocabCards({
         }}
         onDrop={onDrop}
       >
-        {renderedCards.map((card, i) =>
+        {hidden ? (
+          <button
+            type="button"
+            className="vocab-collapsed-bar"
+            onContextMenu={(e) => {
+              e.preventDefault();
+              onContext(e, null);
+            }}
+            title="词条卡片已隐藏 · 右键显示"
+          >
+            词条卡片已隐藏 · 右键恢复
+          </button>
+        ) : (
+          renderedCards.map((card, i) =>
           card.kind === "word" ? (
             <VocabCard
               key={card.key}
@@ -878,6 +896,7 @@ export function VocabCards({
               onDragEnd={onDragEnd}
             />
           ),
+          )
         )}
       </div>
 
@@ -907,9 +926,22 @@ export function VocabCards({
               </button>
             </>
           ) : (
-            <button className="ctx-item" onClick={addCard}>
-              新建空白卡片
-            </button>
+            <>
+              {!hidden && (
+                <button className="ctx-item" onClick={addCard}>
+                  新建词条卡片
+                </button>
+              )}
+              <button
+                className="ctx-item"
+                onClick={() => {
+                  closeMenu();
+                  onToggleHidden?.();
+                }}
+              >
+                {hidden ? "显示词条卡片" : "隐藏词条卡片"}
+              </button>
+            </>
           )}
           <button className="ctx-item dim" onClick={closeMenu}>
             取消
