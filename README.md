@@ -54,13 +54,15 @@ Windows 双击 **`dev.cmd`**；macOS / Linux 运行 **`./dev.sh`**。
 
 不想装 Python / Node / ffmpeg，直接用发行包。同一个版本提供两份压缩包，按需下载：
 
-| 压缩包 | 体积 | 导出视频 | 说明 |
-| --- | --- | --- | --- |
-| `UtaLearnNext-<版本>-lite.zip` | ~285 MB | 取决于本机是否装了 Chrome | 搜索歌词、生成、跟唱、词汇卡全部可用 |
-| `UtaLearnNext-<版本>-full.zip` | ~600 MB | ✅ 一定可用 | 额外内置 Chromium，干净机器也能导出 |
+| 压缩包 | 体积 | 说明 |
+| --- | --- | --- |
+| `UtaLearnNext-<版本>-lite.zip` | ~290 MB | 完整应用：搜索歌词、生成、跟唱、词汇卡、歌词/卡片编辑。本机已装 Chrome 时可直接导出视频。 |
+| `UtaLearnNext-<版本>-chromium.zip` | ~316 MB | 可选扩展包：内置 Chromium。没有 Chrome 又想导出视频时，把它解压到 lite 目录的 `browsers/` 即可。 |
 
-两者解压后双击 **`启动 Uta Learn Next.cmd`** 即可。都自带 Python 运行时、ffmpeg/ffprobe
-与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。
+lite 解压后双击 **`启动 Uta Learn Next.cmd`** 即可。自带 Python 运行时、ffmpeg/ffprobe
+与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。需要导出但本机没装
+Chrome 时，再把 chromium 扩展包解压进来就行——程序下次启动会自动识别 `browsers/`，
+不用装、不用改配置。
 
 数据默认写在文件夹内的 `localdata/` 与 `exports/`（便携语义，整个文件夹可拷走）；
 如果文件夹不可写（例如解压到受保护目录），会自动回退到 `%LOCALAPPDATA%\UtaLearnNext\`。
