@@ -271,19 +271,41 @@ def _transcribe(x: np.ndarray, progress) -> list[dict]:
     Passing the array (rather than a path) keeps faster-whisper away from PyAV's
     ``av.open(..., metadata_errors=...)``, which older PyAV builds reject.
     """
+    # The first run downloads the model from HuggingFace. huggingface_hub only
+    # honours *_PROXY env vars, so a Windows "system proxy" never reaches it —
+    # feed it the same probe the lyric sources use, or the download dies
+    # before a single segment is ever transcribed.
+    try:
+        from .sources import _system_proxy
+        px = _system_proxy()
+        if px:
+            os.environ.setdefault("HTTPS_PROXY", px)
+            os.environ.setdefault("HTTP_PROXY", px)
+    except Exception:  # noqa: BLE001
+        pass
     _enable_cuda_dlls()
     from faster_whisper import WhisperModel
 
     want = os.environ.get("UTALEARN_WHISPER", "large-v3")
     attempts = []
+    cuda_ok = False
     try:
         import torch
         if torch.cuda.is_available():
-            attempts.append((want, "cuda", "float16"))
+            cuda_ok = True
     except Exception:  # noqa: BLE001
         pass
-    attempts.append((want, "cpu", "int8"))
-    attempts.append(("small", "cpu", "int8"))
+    if cuda_ok:
+        # GPU: the big model transcribes well enough that its anchors are worth
+        # the 3GB download on first use.
+        attempts.append((want, "cuda", "float16"))
+        attempts.append(("small", "cuda", "float16"))
+    else:
+        # CPU-only: start with `small` (~500MB, first-run download is 6x cheaper
+        # than large-v3 and fast enough to be usable); large stays as the
+        # accuracy upgrade for anyone who sets UTALEARN_WHISPER explicitly.
+        attempts.append(("small", "cpu", "int8"))
+        attempts.append((want, "cpu", "int8"))
 
     last = None
     for name, device, ctype in attempts:
@@ -311,6 +333,16 @@ def _transcribe(x: np.ndarray, progress) -> list[dict]:
         except Exception as e:  # noqa: BLE001
             last = e
             continue
+    # Tell download failures apart from real decode failures — the first needs a
+    # network hint, the second needs an audio hint, and the user's report only
+    # ever shows `last`.
+    txt = str(last).lower()
+    if any(k in txt for k in ("connect", "resolve", "timeout", "proxy",
+                              "huggingface", "snapshot", "localentrynotfound")):
+        raise RuntimeError(
+            f"whisper 模型下载失败（首次使用要联网下载模型）：{last}。"
+            "请检查网络或代理后重试；不需要单独安装 whisper 软件。"
+        )
     raise RuntimeError(f"whisper 转写失败：{last}")
 
 
