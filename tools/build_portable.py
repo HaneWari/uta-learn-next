@@ -1,24 +1,22 @@
-"""Assemble portable, no-install builds of Uta Learn Next (Windows).
+"""Assemble the portable, no-install build of Uta Learn Next (Windows).
 
-Two archives of the same release, so users pick what they need:
+One core archive per release plus two *optional* extension packs, so a user
+downloads only what they need:
 
-  UtaLearnNext-<ver>-lite.zip   core app, no browser        (~450 MB)
-  UtaLearnNext-<ver>-full.zip   + Chromium for video export (~900 MB)
+  UtaLearnNext-<ver>.zip            the whole app            (~290 MB)
+  UtaLearnNext-chromium.zip         + bundled Chromium       (~316 MB, version-free)
+  UtaLearnNext-whisper-small.zip    speech model for 自定义歌词 (~426 MB, version-free)
 
-Both are plain "unzip and double-click" — no Python, no Node, no ffmpeg, no
-admin rights. Data lives inside the folder (or %LOCALAPPDATA% when read-only).
-
-A third, *version-independent* archive carries the optional whisper model used
-by the custom-lyrics path. It is built once from a machine that already has the
-model in its HF cache and shipped on every release:
-
-  UtaLearnNext-whisper-small.zip  speech model for 自定义歌词  (~460 MB)
-
-Unzipping it into the app folder yields `models/whisper-small/`; the backend
-loads it straight from disk, so the feature works fully offline.
+All are plain "unzip and double-click" — no Python, no Node, no ffmpeg, no
+admin rights. An extension pack lands as a folder next to the app (`browsers/`,
+`models/`) and is picked up on the next start; data lives inside the folder
+(or %LOCALAPPDATA% when read-only). Both extension packs are version-
+independent — a browser binary and a frozen speech model change far slower
+than the app, so they are built once and reused on every release.
 
 Usage:
-  python tools/build_portable.py                 # build both zips
+  python tools/build_portable.py                 # core zip + chromium pack
+  python tools/build_portable.py --no-chromium   # core zip only
   python tools/build_portable.py --whisper-pack  # only the whisper extension zip
   python tools/build_portable.py --no-zip        # just the folder
   python tools/build_portable.py --out D:/x      # build elsewhere (space!)
@@ -36,7 +34,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 PY_VERSION = "3.13.2"
 PY_ZIP = f"https://www.python.org/ftp/python/{PY_VERSION}/python-{PY_VERSION}-embed-amd64.zip"
@@ -111,6 +109,10 @@ def install_packages(py: Path, base: Path) -> None:
     pip_boot = download(GET_PIP, base.parent / "cache" / "get-pip.py")
     say("安装 pip …")
     subprocess.run([str(exe), str(pip_boot), "--no-warn-script-location", "-q"], check=True)
+    # unidic-lite ships as sdist only, so the embedded interpreter needs a
+    # build backend (setuptools+wheel) before the real deps can compile
+    subprocess.run([str(exe), "-m", "pip", "install", "-q",
+                    "--no-warn-script-location", "setuptools", "wheel"], check=True)
     say(f"安装依赖（{len(REQUIREMENTS)} 个包，几分钟）…")
     subprocess.run([str(exe), "-m", "pip", "install", "-q",
                     "--no-warn-script-location", *REQUIREMENTS], check=True)
@@ -245,6 +247,34 @@ def make_zip(base: Path, out: Path, extra: dict[str, Path] | None = None) -> Pat
     return out
 
 
+def make_addon_zip(folder: Path, out: Path) -> Path:
+    """Zip a single extension folder as `UtaLearnNext/<folder>/…`.
+
+    Extension packs (browsers/, models/) unzip *into* the app folder, so they
+    carry the same `UtaLearnNext/` wrapper the core zip uses — extracting them
+    at the same level as the core zip drops the folder right next to the app.
+    """
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()
+    say(f"打包 {out.name} …")
+    total = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for f in folder.rglob("*"):
+            if f.is_file():
+                z.write(f, f"UtaLearnNext/{folder.name}/{f.relative_to(folder)}")
+                total += 1
+        z.writestr(
+            f"UtaLearnNext/{folder.name}/README-where-this-goes.txt",
+            "把这个压缩包解压到 UtaLearnNext 应用目录的同级，\n"
+            "使里面的文件夹落到应用目录里（如 browsers/ 或 models/），\n"
+            "之后重新启动程序即可生效。\n",
+        )
+        total += 1
+    say(f"  {total} 个文件，{out.stat().st_size / 1048576:.0f} MB")
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # whisper model extension pack (version-independent)
 # --------------------------------------------------------------------------- #
@@ -305,7 +335,11 @@ def stage_whisper_model(dest: Path) -> Path:
 
 
 def make_whisper_zip(out: Path) -> Path:
-    """Standalone zip: `models/whisper-small/…`, version-free on purpose."""
+    """Standalone zip: `UtaLearnNext/models/whisper-small/…`, version-free.
+
+    Same `UtaLearnNext/` wrapper as the core + chromium zips, so all three
+    unzip at the same level and land inside the app folder consistently.
+    """
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
         out.unlink()
@@ -316,11 +350,12 @@ def make_whisper_zip(out: Path) -> Path:
         snap = _whisper_snapshot()
         for f in sorted(snap.iterdir()):
             if f.is_file() or f.is_symlink():
-                z.write(f.resolve(), f"models/{WHISPER_DIRNAME}/{f.name}")
+                z.write(f.resolve(),
+                        f"UtaLearnNext/models/{WHISPER_DIRNAME}/{f.name}")
         # a tiny readme so an unzip-first user knows where the folder goes
         z.writestr(
-            "models/README-where-this-goes.txt",
-            "把整个 models 文件夹解压到 UtaLearnNext 应用目录，得到\n"
+            "UtaLearnNext/models/README-where-this-goes.txt",
+            "把本包解压到 UtaLearnNext 应用目录的同级，得到\n"
             "  UtaLearnNext/models/whisper-small/model.bin\n"
             "之后重新启动程序，自定义歌词即可离线语音识别。\n",
         )
@@ -333,7 +368,8 @@ def main() -> int:
     ap.add_argument("--out", default=str(ROOT / "dist-portable"), help="构建目录")
     ap.add_argument("--no-zip", action="store_true", help="只生成文件夹")
     ap.add_argument("--ffmpeg-dir", default=None, help="自带 ffmpeg 的目录（跳过下载）")
-    ap.add_argument("--no-full", action="store_true", help="只做 lite 包")
+    ap.add_argument("--no-chromium", action="store_true",
+                    help="只出核心包，不打包 Chromium 扩展")
     ap.add_argument("--zip-out", default=None, help="ZIP 输出目录（默认与构建目录同级）")
     ap.add_argument("--browsers-dir", default=None, help="Chromium 安装位置（默认构建目录旁）")
     ap.add_argument("--whisper-pack", action="store_true",
@@ -373,13 +409,15 @@ def main() -> int:
         return 0
 
     zip_root = Path(args.zip_out).resolve() if args.zip_out else out_root
-    make_zip(base, zip_root / f"UtaLearnNext-{VERSION}-lite.zip")
+    make_zip(base, zip_root / f"UtaLearnNext-{VERSION}.zip")
 
-    if not args.no_full:
+    if not args.no_chromium:
         bdir = Path(args.browsers_dir).resolve() if args.browsers_dir else None
         browsers = install_chromium(py, base, bdir)
-        make_zip(base, zip_root / f"UtaLearnNext-{VERSION}-full.zip",
-                 extra={"browsers": browsers})
+        # standalone add-on: only the browsers/ tree, wrapped so it unzips
+        # into the app folder as UtaLearnNext/browsers/. Version-free name —
+        # a browser binary works with any app version.
+        make_addon_zip(browsers, zip_root / "UtaLearnNext-chromium.zip")
     return 0
 
 

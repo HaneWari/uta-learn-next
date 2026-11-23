@@ -530,10 +530,11 @@ def api_job(jid: str):
 
 GITHUB_REPO = "HaneWari/uta-learn-next"
 WHISPER_ASSET = "UtaLearnNext-whisper-small.zip"
+_WHISPER_NAME = "whisper-small"
 
 
 def _whisper_model_dir() -> Path:
-    return APP_ROOT / "models" / "whisper-small"
+    return APP_ROOT / "models" / _WHISPER_NAME
 
 
 def _whisper_installed() -> bool:
@@ -573,7 +574,7 @@ def api_model_install():
 
         progress(0.05, "查询最新发行版…")
         url = _latest_whisper_url()
-        progress(0.10, "下载模型扩展包（约 460MB，请稍候）…")
+        progress(0.10, "下载模型扩展包（约 426MB，请稍候）…")
         buf = io.BytesIO()
         with httpx.Client(timeout=None, follow_redirects=True) as c:
             with c.stream("GET", url) as r:
@@ -592,7 +593,21 @@ def api_model_install():
         dest.mkdir(parents=True, exist_ok=True)
         buf.seek(0)
         with zipfile.ZipFile(buf) as z:
-            z.extractall(dest)
+            # the zip carries a `UtaLearnNext/` wrapper (same as the core and
+            # chromium packs); strip it so `…/models/whisper-small/` lands
+            # inside the app folder no matter where the user unzipped it
+            for member in z.namelist():
+                rel = member[len("UtaLearnNext/"):] \
+                    if member.startswith("UtaLearnNext/") else member
+                if not rel.startswith("models/"):
+                    continue
+                target = APP_ROOT / rel
+                if member.endswith("/"):
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(member) as src, target.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
         if not _whisper_installed():
             raise RuntimeError("解压后未找到 models/whisper-small/model.bin")
         progress(0.98, "安装完成")

@@ -419,7 +419,7 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                   <>
                     <div className="model-banner-text">
                       <strong>自定义歌词需要语音识别扩展</strong>
-                      <span>一次性下载约 460MB，装好即可离线使用（不随版本更新）</span>
+                      <span>一次性下载约 426MB，装好即可离线使用（不随版本更新）</span>
                     </div>
                     <div className="model-banner-actions">
                       <button

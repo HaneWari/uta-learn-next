@@ -52,18 +52,21 @@ Windows 双击 **`dev.cmd`**；macOS / Linux 运行 **`./dev.sh`**。
 
 ### 免安装（解压即用）
 
-不想装 Python / Node / ffmpeg，直接用发行包。同一个版本提供两份压缩包，按需下载：
+不想装 Python / Node / ffmpeg，直接用发行包。**一个核心包 + 两个可选扩展包**，按需下载：
 
 | 压缩包 | 体积 | 说明 |
 | --- | --- | --- |
-| `UtaLearnNext-<版本>-lite.zip` | ~290 MB | 完整应用：搜索歌词、生成、跟唱、词汇卡、歌词/卡片编辑。本机有任意 Chromium 内核浏览器（Chrome / Edge / Brave / 360 / QQ 等）即可直接导出视频。 |
-| `UtaLearnNext-<版本>-chromium.zip` | ~316 MB | 可选扩展包：内置 Chromium。没有 Chromium 内核浏览器又想导出视频时，把它解压到 lite 目录的 `browsers/` 即可。 |
-| `UtaLearnNext-whisper-small.zip` | ~460 MB | 可选扩展包（**版本无关**，任意版本通用）：自定义歌词用的语音识别模型。解压到应用目录得到 `models/whisper-small/` 后即可离线对齐歌词；不需要此功能可不下载。 |
+| `UtaLearnNext-<版本>.zip` | ~290 MB | 完整应用：搜索歌词、生成、跟唱、词汇卡、歌词/卡片编辑。本机有任意 Chromium 内核浏览器（Chrome / Edge / Brave / 360 / QQ 等）即可直接导出视频。 |
+| `UtaLearnNext-chromium.zip` | ~316 MB | 可选扩展包（**版本无关**）：内置 Chromium。没有 Chromium 内核浏览器又想导出视频时，解压到应用目录得到 `browsers/` 即可。 |
+| `UtaLearnNext-whisper-small.zip` | ~426 MB | 可选扩展包（**版本无关**）：自定义歌词用的语音识别模型。解压到应用目录得到 `models/whisper-small/` 后即可离线对齐歌词；不需要此功能可不下载。 |
 
-lite 解压后双击 **`启动 Uta Learn Next.cmd`** 即可。自带 Python 运行时、ffmpeg/ffprobe
+核心包解压后双击 **`启动 Uta Learn Next.cmd`** 即可。自带 Python 运行时、ffmpeg/ffprobe
 与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。需要导出但本机没有
 Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium 扩展包解压进来就行——
 程序下次启动会自动识别 `browsers/`，不用装、不用改配置。
+
+两个扩展包都**与版本无关**：浏览器二进制和冻结的语音模型远比应用更新慢，下载一次即可
+在任意版本上复用，升级应用不必重下。
 
 **自定义歌词**（把自己的歌词文本对到音频上）用到的 whisper 语音识别模型**不随包分发**，
 单独作为 `whisper-small` 扩展包提供——它不依赖版本，下载一次即可。最省事的方式是
@@ -77,8 +80,9 @@ Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium 
 自己打包：
 
 ```bash
-python tools/build_portable.py                    # 同时产出 lite 与 full 两个 zip
-python tools/build_portable.py --no-full          # 只做 lite
+python tools/build_portable.py                    # 核心包 + chromium 扩展包
+python tools/build_portable.py --no-chromium      # 只出核心包
+python tools/build_portable.py --whisper-pack     # 只出 whisper 模型扩展包
 python tools/build_portable.py --no-zip           # 只生成文件夹
 python tools/build_portable.py --out D:/build     # 换构建目录（磁盘空间不够时用）
 python tools/build_portable.py --zip-out D:/rel --browsers-dir D:/br   # 大文件放别的盘
