@@ -142,14 +142,16 @@ export interface Job {
 
 export interface ExportEnv {
   ok: boolean;
-  /** ok | no_playwright | no_browser | no_ffmpeg */
-  state: "ok" | "no_playwright" | "no_browser" | "no_ffmpeg";
+  /** ok | no_playwright | no_browser | no_recorder | no_ffmpeg */
+  state: "ok" | "no_playwright" | "no_browser" | "no_recorder" | "no_ffmpeg";
   checks: {
     playwright: boolean;
     browser_path: string | null;
     bundled_chromium: boolean;
     browser_launch: boolean;
     launch_error: string;
+    record_video: boolean;
+    record_error: string;
     ffmpeg: boolean;
     candidates: string[];
   };

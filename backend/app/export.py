@@ -232,6 +232,36 @@ def pick_browser(timeout_ms: int = _PROBE_TIMEOUT) -> tuple[str | None, str]:
     return None, err or "没有候选浏览器能启动"
 
 
+def probe_record_video(exe: str, timeout_ms: int = _PROBE_TIMEOUT) -> tuple[bool, str]:
+    """Launch the chosen browser and open a recording context — the *real*
+    requirement for export. A browser that starts but can't record (missing
+    playwright ffmpeg-*, broken codec support) would launch green yet still
+    fail mid-export, so it gets probed too.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:  # noqa: BLE001
+        return False, f"playwright 不可用：{e}"
+    work = Path(tempfile.mkdtemp(prefix="utaprobe_"))
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                executable_path=exe, timeout=timeout_ms, args=_LAUNCH_ARGS)
+            ctx = browser.new_context(
+                viewport={"width": 64, "height": 64},
+                record_video_dir=str(work),
+                record_video_size={"width": 64, "height": 64})
+            ctx.new_page().goto("about:blank")
+            ctx.close()          # closing flushes + exercises the recorder
+            browser.close()
+        return True, ""
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)[:300]
+    finally:
+        import shutil as _sh
+        _sh.rmtree(work, ignore_errors=True)
+
+
 def env_check() -> dict:
     """Detailed environment diagnosis for the export feature.
 
@@ -242,6 +272,8 @@ def env_check() -> dict:
       no_playwright — the python package itself is missing → offer pip fix
       no_browser   — playwright is there but nothing launches → offer the
                      bundled-Chromium extension pack
+      no_recorder  — browser launches but can't record video (missing the
+                     playwright ffmpeg component) → playwright repair
       no_ffmpeg    — browser is fine but the mux tool is missing
     """
     try:
@@ -255,14 +287,20 @@ def env_check() -> dict:
         exe, launch_err = pick_browser()
     launch_ok = exe is not None
 
+    record_ok, record_err = (False, "")
+    if launch_ok:
+        record_ok, record_err = probe_record_video(exe)
+
     has_ffmpeg = binaries.find("ffmpeg") is not None
 
     if not has_playwright:
         state = "no_playwright"
-    elif launch_ok and has_ffmpeg:
+    elif launch_ok and record_ok and has_ffmpeg:
         state = "ok"
     elif not launch_ok:
         state = "no_browser"
+    elif not record_ok:
+        state = "no_recorder"
     else:
         state = "no_ffmpeg"
 
@@ -275,6 +313,8 @@ def env_check() -> dict:
             "bundled_chromium": _has_bundled_chromium(),
             "browser_launch": launch_ok,
             "launch_error": launch_err,
+            "record_video": record_ok,
+            "record_error": record_err,
             "ffmpeg": has_ffmpeg,
             "candidates": _chrome_candidates() if has_playwright else [],
         },

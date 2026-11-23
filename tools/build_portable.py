@@ -167,7 +167,10 @@ def install_chromium(py: Path, base: Path, dest: Path | None = None) -> Path:
         say("Chromium 已就绪，跳过")
         return browsers
     say("安装 Chromium（导出用，约 430MB）…")
-    subprocess.run([str(py / "python.exe"), "-m", "playwright", "install", "chromium"],
+    # `ffmpeg` is playwright's own recorder component — record_video_dir needs
+    # its ffmpeg-* build, separate from the mux ffmpeg in bin/
+    subprocess.run([str(py / "python.exe"), "-m", "playwright", "install",
+                    "chromium", "ffmpeg"],
                    check=True, env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers)})
     return browsers
 

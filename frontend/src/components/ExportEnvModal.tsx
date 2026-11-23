@@ -182,6 +182,12 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
                   ""
                 )}
               </li>
+              {c?.browser_launch === true && c?.record_video === false && (
+                <li className="bad">
+                  视频录制组件
+                  <span className="env-err">{c.record_error}</span>
+                </li>
+              )}
               <li className={c?.ffmpeg ? "ok" : "bad"}>
                 ffmpeg{c?.ffmpeg ? "" : "（缺失，无法合成视频）"}
               </li>
@@ -191,6 +197,8 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
               <p className="bghint">
                 {env.state === "no_ffmpeg"
                   ? "缺少 ffmpeg，点「自动修复」即可自动下载安装。"
+                  : env.state === "no_recorder"
+                    ? "浏览器能启动但缺少录制组件（playwright 自带 ffmpeg），点「自动修复」补齐。"
                   : "点「自动修复」让程序装好缺失的组件；修复不了再装内置 Chromium 扩展包。"}
               </p>
             )}
@@ -213,6 +221,7 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
               <div className="env-actions">
                 {(env.state === "no_playwright" ||
                   env.state === "no_browser" ||
+                  env.state === "no_recorder" ||
                   env.state === "no_ffmpeg") && (
                   <button
                     className={`btn${fixFailed ? "" : " primary"}`}

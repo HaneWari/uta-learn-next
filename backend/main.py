@@ -803,11 +803,18 @@ def api_export_fix():
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-q", "playwright"],
                 check=True, capture_output=True)
-        if not checks["browser_launch"]:
+        # launch failing means no usable browser; launch succeeding but
+        # record_video failing means the playwright ffmpeg component is
+        # missing — both are fixed by `playwright install`
+        if not checks["browser_launch"] or not checks.get("record_video", True):
             progress(0.55, "下载 Chromium（约 130MB，请稍候）…")
             try:
                 subprocess.run(
-                    [sys.executable, "-m", "playwright", "install", "chromium"],
+                    # `record_video` needs playwright's own ffmpeg-* build too —
+                    # `install chromium` alone leaves new_context() demanding
+                    # ffmpeg-win64.exe that was never downloaded
+                    [sys.executable, "-m", "playwright", "install",
+                     "chromium", "ffmpeg"],
                     check=True, capture_output=True, env=dict(os.environ))
             except Exception:  # noqa: BLE001
                 # playwright's own download being blocked is exactly the case
@@ -819,7 +826,8 @@ def api_export_fix():
         progress(0.98, "完成")
         return {"ok": c["ok"], "state": c["state"], "env": c,
                 "needs_restart": c["ok"],
-                "needs_extension": c["state"] in ("no_browser", "no_playwright")}
+                "needs_extension": c["state"] in ("no_browser", "no_playwright",
+                                                 "no_recorder")}
 
     jobs.run(jid, work)
     return {"job_id": jid}
