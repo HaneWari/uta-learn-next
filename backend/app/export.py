@@ -177,7 +177,12 @@ _LAUNCH_ARGS = [
 ]
 
 
-def probe_browser(exe: str, timeout_ms: int = 15000, pw=None) -> tuple[bool, str]:
+# a cold browser + an overzealous AV can take a while; 15 s was too tight and
+# turned real, working installs into "no_browser" false negatives
+_PROBE_TIMEOUT = 30000
+
+
+def probe_browser(exe: str, timeout_ms: int = _PROBE_TIMEOUT, pw=None) -> tuple[bool, str]:
     """Actually launch the candidate once — a path that exists is not proof it
     runs (64-bit exe on ARM, killed DLL, blocked by policy, partial install…).
 
@@ -204,7 +209,7 @@ def probe_browser(exe: str, timeout_ms: int = 15000, pw=None) -> tuple[bool, str
         return False, str(e)[:300]
 
 
-def pick_browser(timeout_ms: int = 15000) -> tuple[str | None, str]:
+def pick_browser(timeout_ms: int = _PROBE_TIMEOUT) -> tuple[str | None, str]:
     """First candidate that actually launches, else (None, last error).
 
     One sync_playwright context serves the whole scan so a broken first
@@ -384,9 +389,10 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
     from playwright.sync_api import sync_playwright
 
     p = progress or (lambda frac, msg: None)
-    ok, why = available()
-    if not ok:
-        raise RuntimeError(why)
+    # don't gate on available()/env_check here: they re-run pick_browser and a
+    # flaky or slow probe can disagree with the launch loop right below and
+    # report "导出不可用" even when a browser would come up. The launch loop
+    # is the authoritative check — it tries every candidate for real.
 
     out.parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="utaexport_"))

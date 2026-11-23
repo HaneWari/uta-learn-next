@@ -1081,10 +1081,6 @@ async def api_export(payload: dict):
     # profile also has to see — read the flag the stage toggles, not the body
     hide_trans = _meta_flag(name, "trans_hidden")
 
-    ok, why = export.available()
-    if not ok:
-        raise HTTPException(status_code=503, detail=f"导出不可用：{why}")
-
     jid = jobs.create("export")
 
     def work(progress):
