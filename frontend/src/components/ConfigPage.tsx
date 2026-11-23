@@ -59,8 +59,11 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
   /* manual version-matching inputs for the search mode: when the source's
      timeline and the uploaded audio disagree in length, the user types the
      cut point (m:ss) for whichever side is longer */
-  const [lyricStart, setLyricStart] = useState("");
-  const [audioStart, setAudioStart] = useState("");
+  // crop start entered as separate 分/秒 fields; joined into "m:ss" on build
+  const [lyricMin, setLyricMin] = useState("");
+  const [lyricSec, setLyricSec] = useState("");
+  const [audioMin, setAudioMin] = useState("");
+  const [audioSec, setAudioSec] = useState("");
   /* custom-lyrics: ask for the offline zh translation during the build job */
   const [wantTranslate, setWantTranslate] = useState(false);
 
@@ -188,10 +191,12 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
       title: title || picked.title,
       artist: artist || picked.artist,
     };
-    if (srcDur > audDur + 2 && lyricStart.trim()) {
-      payload.lyric_start = lyricStart.trim();
-    } else if (audDur > srcDur + 2 && audioStart.trim()) {
-      payload.audio_start = audioStart.trim();
+    const mmss = (m: string, s: string) =>
+      `${m.trim() || "0"}:${(s.trim() || "0").padStart(2, "0")}`;
+    if (srcDur > audDur + 2 && (lyricMin.trim() || lyricSec.trim())) {
+      payload.lyric_start = mmss(lyricMin, lyricSec);
+    } else if (audDur > srcDur + 2 && (audioMin.trim() || audioSec.trim())) {
+      payload.audio_start = mmss(audioMin, audioSec);
     }
     void track(() =>
       api.buildFromSource(picked, payload),
@@ -436,30 +441,48 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                 <div className="crop-box">
                   {sourceLonger ? (
                     <label className="crop-field">
-                      歌词源（{fmtDur(srcDur)}）比音频（{fmtDur(audDur)}）长。
-                      请填歌词开始的裁剪起点：
+                      歌词轴（{fmtDur(srcDur)}）比音频（{fmtDur(audDur)}）长。
+                      请输入歌词轴播放的起点时刻：
                       <span className="crop-input">
                         <input
-                          value={lyricStart}
-                          onChange={(e) => setLyricStart(e.target.value)}
-                          placeholder="0:00"
+                          className="crop-num"
+                          value={lyricMin}
+                          onChange={(e) => setLyricMin(e.target.value)}
+                          placeholder="0"
                           inputMode="numeric"
                         />
-                        <span className="crop-unit">分:秒</span>
+                        <span className="crop-unit">分</span>
+                        <input
+                          className="crop-num"
+                          value={lyricSec}
+                          onChange={(e) => setLyricSec(e.target.value)}
+                          placeholder="00"
+                          inputMode="numeric"
+                        />
+                        <span className="crop-unit">秒</span>
                       </span>
                     </label>
                   ) : (
                     <label className="crop-field">
-                      音频（{fmtDur(audDur)}）比歌词源（{fmtDur(srcDur)}）长。
-                      请填歌词开始的裁剪起点：
+                      音频（{fmtDur(audDur)}）比歌词轴（{fmtDur(srcDur)}）长。
+                      请输入音频播放的起点时刻：
                       <span className="crop-input">
                         <input
-                          value={audioStart}
-                          onChange={(e) => setAudioStart(e.target.value)}
-                          placeholder="0:00"
+                          className="crop-num"
+                          value={audioMin}
+                          onChange={(e) => setAudioMin(e.target.value)}
+                          placeholder="0"
                           inputMode="numeric"
                         />
-                        <span className="crop-unit">分:秒</span>
+                        <span className="crop-unit">分</span>
+                        <input
+                          className="crop-num"
+                          value={audioSec}
+                          onChange={(e) => setAudioSec(e.target.value)}
+                          placeholder="00"
+                          inputMode="numeric"
+                        />
+                        <span className="crop-unit">秒</span>
                       </span>
                     </label>
                   )}
@@ -540,13 +563,17 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                 <span className="picked-note">
                   会用 whisper 在这段音频上自动对齐每一句
                 </span>
-                <label className="translate-check">
+                <label className="tswitch" title="用本地翻译模型为每句歌词生成中文翻译">
                   <input
                     type="checkbox"
+                    className="tswitch-input"
                     checked={wantTranslate}
                     onChange={(e) => setWantTranslate(e.target.checked)}
                   />
-                  开启中文翻译
+                  <span className="tswitch-track" aria-hidden="true">
+                    <span className="tswitch-thumb" />
+                  </span>
+                  <span className="tswitch-label">开启中文翻译</span>
                 </label>
                 <button className="btn primary" onClick={buildFromText} disabled={!canCustom}>
                   生成

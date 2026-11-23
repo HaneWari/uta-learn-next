@@ -34,23 +34,25 @@ PAD_MAX = 12.0
 CHROME_ENV = "UTALEARN_CHROME"
 
 
-def _chrome(pw=None) -> str | None:
-    """Resolve a Chromium executable.
+def _chrome_candidates(pw=None) -> list[str]:
+    """Every Chromium executable we could try, best guess first.
 
     `pw` must be passed when a Playwright context is already open: starting a
     second sync context inside it would raise.
 
-    Playwright's own `executable_path` is not enough here. The Python package
-    pins one browser revision, and the machine often has a different one
-    installed (another Playwright version, or a partial download), so the pinned
-    path can simply not exist. Fall back to scanning the browser cache for any
-    usable build before giving up.
+    The order encodes preference (explicit override → Playwright's pinned build
+    → bundled extension pack → cache → system installs → PATH), but *existence*
+    is all that's checked here. Which one actually launches is decided by
+    probing, because a path that exists is no proof it runs — a partial
+    `playwright install` leaves a real-looking chrome.exe that fails to spawn,
+    and that one bad candidate must not mask a working system Chrome behind it.
     """
+    candidates: list[str] = []
+
     override = os.environ.get(CHROME_ENV)
     if override and Path(override).exists():
-        return override
+        candidates.append(override)
 
-    candidates: list[str] = []
     try:
         if pw is not None:
             candidates.append(pw.chromium.executable_path)
@@ -118,10 +120,21 @@ def _chrome(pw=None) -> str | None:
         if found:
             candidates.append(found)
 
+    # de-dup preserving order — several of the guesses resolve to one install
+    seen: set[str] = set()
+    out: list[str] = []
     for c in candidates:
-        if c and Path(c).exists():
-            return c
-    return None
+        key = os.path.normcase(c) if c else c
+        if c and key not in seen and Path(c).exists():
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def _chrome(pw=None) -> str | None:
+    """First existing candidate — kept for callers that just need *a* path."""
+    c = _chrome_candidates(pw)
+    return c[0] if c else None
 
 
 def available() -> tuple[bool, str]:
@@ -149,25 +162,69 @@ def _has_bundled_chromium() -> bool:
     return False
 
 
-def probe_browser(exe: str, timeout_ms: int = 15000) -> tuple[bool, str]:
-    """Actually launch the resolved browser once — a path that exists is not
-    proof it runs (64-bit exe on ARM, killed DLL, blocked by policy…).
+# Flags every launch uses — also the ones render() passes, so a candidate that
+# probes green here is guaranteed to come up in the real recorder too.
+_LAUNCH_ARGS = [
+    "--no-sandbox",
+    "--disable-gpu",
+    "--autoplay-policy=no-user-gesture-required",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding",
+    "--disable-features=CalculateNativeWinOcclusion",
+    "--hide-scrollbars",
+    "--mute-audio",
+]
+
+
+def probe_browser(exe: str, timeout_ms: int = 15000, pw=None) -> tuple[bool, str]:
+    """Actually launch the candidate once — a path that exists is not proof it
+    runs (64-bit exe on ARM, killed DLL, blocked by policy, partial install…).
+
+    `pw` lets the caller reuse an open Playwright context: spinning up one
+    `sync_playwright()` per candidate is wasteful when probing a list.
     """
+    def _try(p):
+        browser = p.chromium.launch(
+            executable_path=exe, timeout=timeout_ms, args=_LAUNCH_ARGS)
+        browser.new_context().new_page().goto("about:blank")
+        browser.close()
+        return True
+
     try:
-        from playwright.sync_api import sync_playwright
-    except Exception as e:  # noqa: BLE001
-        return False, f"playwright 不可用：{e}"
-    try:
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                executable_path=exe, timeout=timeout_ms,
-                args=["--no-sandbox", "--disable-gpu"])
-            page = browser.new_context().new_page()
-            page.goto("about:blank")
-            browser.close()
+        if pw is not None:
+            _try(pw)
+        else:
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as own:
+                _try(own)
         return True, ""
     except Exception as e:  # noqa: BLE001
         return False, str(e)[:300]
+
+
+def pick_browser(timeout_ms: int = 15000) -> tuple[str | None, str]:
+    """First candidate that actually launches, else (None, last error).
+
+    One sync_playwright context serves the whole scan so a broken first
+    candidate doesn't cost a fresh driver per try.
+    """
+    candidates = _chrome_candidates()
+    if not candidates:
+        return None, "没有找到任何 Chromium 候选路径"
+    err = ""
+    try:
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as pw:
+            for exe in candidates:
+                ok, err = probe_browser(exe, timeout_ms=timeout_ms, pw=pw)
+                if ok:
+                    return exe, ""
+    except Exception as e:  # noqa: BLE001
+        err = str(e)[:300]
+    return None, err or "没有候选浏览器能启动"
 
 
 def env_check() -> dict:
@@ -188,10 +245,10 @@ def env_check() -> dict:
     except Exception:  # noqa: BLE001
         has_playwright = False
 
-    exe = _chrome() if has_playwright else None
-    launch_ok, launch_err = (False, "")
-    if exe:
-        launch_ok, launch_err = probe_browser(exe)
+    exe, launch_err = (None, "")
+    if has_playwright:
+        exe, launch_err = pick_browser()
+    launch_ok = exe is not None
 
     has_ffmpeg = binaries.find("ffmpeg") is not None
 
@@ -214,6 +271,7 @@ def env_check() -> dict:
             "browser_launch": launch_ok,
             "launch_error": launch_err,
             "ffmpeg": has_ffmpeg,
+            "candidates": _chrome_candidates() if has_playwright else [],
         },
     }
 
@@ -337,18 +395,22 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
     try:
         p(0.02, "启动浏览器…")
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(
-                executable_path=_chrome(pw),
-                args=[
-                    "--autoplay-policy=no-user-gesture-required",
-                    "--disable-background-timer-throttling",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-renderer-backgrounding",
-                    "--disable-features=CalculateNativeWinOcclusion",
-                    "--hide-scrollbars",
-                    "--mute-audio",
-                ],
-            )
+            # launch the first candidate that actually comes up — same pick as
+            # the pre-flight probe, so a broken playwright cache can't mask a
+            # healthy system browser sitting behind it
+            exe, err = (None, "")
+            for cand in _chrome_candidates(pw):
+                try:
+                    exe, err = cand, ""
+                    browser = pw.chromium.launch(
+                        executable_path=cand, args=_LAUNCH_ARGS)
+                    break
+                except Exception as e:  # noqa: BLE001
+                    err = str(e)[:300]
+                    exe = None
+            if exe is None:
+                raise RuntimeError(
+                    "没有能启动的 Chromium 浏览器：" + (err or "未找到候选"))
             ctx = browser.new_context(
                 viewport={"width": W, "height": H},
                 device_scale_factor=1,

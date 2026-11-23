@@ -151,6 +151,7 @@ export interface ExportEnv {
     browser_launch: boolean;
     launch_error: string;
     ffmpeg: boolean;
+    candidates: string[];
   };
 }
 

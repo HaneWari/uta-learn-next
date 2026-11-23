@@ -952,6 +952,10 @@ body {
   color: #3a2f24;
 }
 
+.crop-input input.crop-num {
+  width: 52px;
+}
+
 .crop-input input:focus {
   outline: 2px solid rgba(190, 148, 104, 0.45);
   border-color: transparent;
@@ -962,20 +966,63 @@ body {
   color: #8a7460;
 }
 
-.translate-check {
+/* iOS-style toggle for the lyric-translation option. The checked track uses
+   the same coral gradient as the 生成 button so "on" reads as the app's
+   primary accent. */
+.tswitch {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   font-size: 13.5px;
   color: #4a3a2b;
   white-space: nowrap;
   cursor: pointer;
+  user-select: none;
 }
 
-.translate-check input {
-  accent-color: #b06a2e;
-  width: 15px;
-  height: 15px;
+.tswitch-input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.tswitch-track {
+  position: relative;
+  flex: none;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: #d8cdbd;
+  border: 1px solid rgba(150, 120, 90, 0.4);
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.tswitch-thumb {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fffdf8;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.28);
+  transition: left 0.18s ease;
+}
+
+.tswitch-input:checked + .tswitch-track {
+  background: linear-gradient(160deg, var(--coral), var(--coral-deep));
+  border-color: transparent;
+}
+
+.tswitch-input:checked + .tswitch-track .tswitch-thumb {
+  left: calc(100% - 20px);
+}
+
+.tswitch-input:focus-visible + .tswitch-track {
+  outline: 2px solid rgba(242, 98, 31, 0.5);
+  outline-offset: 2px;
 }
 
 /* ---------- upload ---------- */

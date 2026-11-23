@@ -164,17 +164,13 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
               </li>
             </ul>
 
-            {env.state === "no_playwright" && (
+            {(env.state === "no_playwright" || env.state === "no_browser") && (
               <p className="bghint">
-                缺少 Playwright 运行库。可以先让程序<b>自动安装修复</b>；
-                修复不了再装 Chromium 扩展包。
-              </p>
-            )}
-            {env.state === "no_browser" && (
-              <p className="bghint">
-                {c?.bundled_chromium
-                  ? "已解压 Chromium 扩展包，但浏览器仍启动失败——可先尝试修复 Playwright 运行库。"
-                  : "没找到能启动的 Chromium 内核浏览器（Chrome / Edge / Brave / 360 / QQ 等均可）。可以先让程序自动修复，或安装内置 Chromium 扩展包。"}
+                {env.state === "no_playwright"
+                  ? "缺少 Playwright 运行库。可以先让程序自动安装修复；修复不了再装 Chromium 扩展包。"
+                  : c?.bundled_chromium
+                    ? "已解压 Chromium 扩展包，但浏览器仍启动失败——可先尝试修复 Playwright 运行库，或重新安装扩展包。"
+                    : "没找到能启动的 Chromium 内核浏览器（Chrome / Edge / Brave / 360 / QQ 等均可）。可以先让程序自动修复，或安装内置 Chromium 扩展包。"}
               </p>
             )}
             {env.state === "no_ffmpeg" && (
@@ -198,14 +194,14 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
               </div>
             ) : (
               <div className="env-actions">
-                {env.state === "no_playwright" && (
+                {(env.state === "no_playwright" || env.state === "no_browser") && (
                   <button className="btn primary" onClick={() => void fixPlaywright()}>
                     自动安装修复
                   </button>
                 )}
                 {(env.state === "no_browser" || env.state === "no_playwright") && (
                   <button
-                    className={`btn${env.state === "no_browser" && !c?.bundled_chromium ? " primary" : ""}`}
+                    className="btn"
                     onClick={() => void installChromium()}
                   >
                     {c?.bundled_chromium ? "重新下载 Chromium 扩展包" : "下载安装 Chromium 扩展包"}
