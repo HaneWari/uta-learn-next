@@ -5,7 +5,7 @@ downloads only what they need:
 
   UtaLearnNext-<ver>.zip            the whole app            (~290 MB)
   UtaLearnNext-chromium.zip         + bundled Chromium       (~316 MB, version-free)
-  UtaLearnNext-whisper-small.zip    speech model for 自定义歌词 (~426 MB, version-free)
+  UtaLearnNext-custom-lyrics.zip    whisper + ja-zh models for 自定义歌词 (~500 MB, version-free)
 
 All are plain "unzip and double-click" — no Python, no Node, no ffmpeg, no
 admin rights. An extension pack lands as a folder next to the app (`browsers/`,
@@ -17,7 +17,7 @@ than the app, so they are built once and reused on every release.
 Usage:
   python tools/build_portable.py                 # core zip + chromium pack
   python tools/build_portable.py --no-chromium   # core zip only
-  python tools/build_portable.py --whisper-pack  # only the whisper extension zip
+  python tools/build_portable.py --custom-pack   # only the custom-lyrics extension zip
   python tools/build_portable.py --no-zip        # just the folder
   python tools/build_portable.py --out D:/x      # build elsewhere (space!)
   python tools/build_portable.py --ffmpeg-dir C:/ffmpeg/bin
@@ -251,11 +251,11 @@ def make_zip(base: Path, out: Path, extra: dict[str, Path] | None = None) -> Pat
 
 
 def make_addon_zip(folder: Path, out: Path) -> Path:
-    """Zip a single extension folder as `UtaLearnNext/<folder>/…`.
+    """Zip a single extension folder as `<folder>/…` — no UtaLearnNext wrapper.
 
-    Extension packs (browsers/, models/) unzip *into* the app folder, so they
-    carry the same `UtaLearnNext/` wrapper the core zip uses — extracting them
-    at the same level as the core zip drops the folder right next to the app.
+    Extension packs drop straight into the app folder (`browsers/` or
+    `models/` next to `启动 Uta Learn Next.cmd`), so the archive carries the
+    folder itself, not a wrapper the unpacker would have to peel off.
     """
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
@@ -265,12 +265,12 @@ def make_addon_zip(folder: Path, out: Path) -> Path:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for f in folder.rglob("*"):
             if f.is_file():
-                z.write(f, f"UtaLearnNext/{folder.name}/{f.relative_to(folder)}")
+                z.write(f, f"{folder.name}/{f.relative_to(folder)}")
                 total += 1
         z.writestr(
-            f"UtaLearnNext/{folder.name}/README-where-this-goes.txt",
-            "把这个压缩包解压到 UtaLearnNext 应用目录的同级，\n"
-            "使里面的文件夹落到应用目录里（如 browsers/ 或 models/），\n"
+            f"{folder.name}/README-where-this-goes.txt",
+            "把这个压缩包解压到 UtaLearnNext 应用目录里，\n"
+            "让里面的文件夹落到应用目录中（如 browsers/ 或 models/），\n"
             "之后重新启动程序即可生效。\n",
         )
         total += 1
@@ -279,15 +279,16 @@ def make_addon_zip(folder: Path, out: Path) -> Path:
 
 
 # --------------------------------------------------------------------------- #
-# whisper model extension pack (version-independent)
+# custom-lyrics extension pack (version-independent)
 # --------------------------------------------------------------------------- #
-# The model is taken from this machine's HuggingFace cache and laid out as a
-# plain ctranslate2 folder, so the app can `WhisperModel(<dir>)` without any
-# huggingface_hub state. `HF_HOME`/`HF_HUB_CACHE`/`HUGGINGFACE_HUB_CACHE` are
-# honoured so a custom cache location still resolves.
+# Bundles the two models 自定义歌词 needs under `models/`: the whisper STT
+# model (from this machine's HF cache) and the ja-zh translation model
+# (converted int8 CT2 in `models/translate-ja-zh`). Neither is ever pulled
+# from HuggingFace at runtime — the pack is what lets them work offline.
 
 WHISPER_REPO = "Systran/faster-whisper-small"
 WHISPER_DIRNAME = "whisper-small"
+TRANSLATE_DIRNAME = "translate-ja-zh"
 
 
 def _hf_cache() -> Path:
@@ -337,11 +338,21 @@ def stage_whisper_model(dest: Path) -> Path:
     return target
 
 
-def make_whisper_zip(out: Path) -> Path:
-    """Standalone zip: `UtaLearnNext/models/whisper-small/…`, version-free.
+def _translate_snapshot() -> Path:
+    """The converted ja-zh model dir under `models/` next to the app."""
+    d = Path(__file__).resolve().parents[1] / "models" / TRANSLATE_DIRNAME
+    if not (d / "model.bin").exists():
+        raise SystemExit(
+            f"在 {d} 找不到翻译模型（缺 model.bin）。先把 opus-mt-ja-zh 的"
+            f" int8 CT2 转换结果放进 models/{TRANSLATE_DIRNAME}/")
+    return d
 
-    Same `UtaLearnNext/` wrapper as the core + chromium zips, so all three
-    unzip at the same level and land inside the app folder consistently.
+
+def make_custom_lyrics_zip(out: Path) -> Path:
+    """Standalone zip: `models/whisper-small/…` + `models/translate-ja-zh/…`.
+
+    Files land directly under `models/` with no wrapper — the app reads the
+    archive by the folder names, same as the chromium pack reads `browsers/`.
     """
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.exists():
@@ -350,17 +361,17 @@ def make_whisper_zip(out: Path) -> Path:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         # model.bin is already quantised; re-deflating it buys ~nothing, but a
         # stored zip still decompresses fine and saves minutes of CPU
-        snap = _whisper_snapshot()
-        for f in sorted(snap.iterdir()):
-            if f.is_file() or f.is_symlink():
-                z.write(f.resolve(),
-                        f"UtaLearnNext/models/{WHISPER_DIRNAME}/{f.name}")
-        # a tiny readme so an unzip-first user knows where the folder goes
+        for snap, sub in ((_whisper_snapshot(), WHISPER_DIRNAME),
+                          (_translate_snapshot(), TRANSLATE_DIRNAME)):
+            for f in sorted(snap.iterdir()):
+                if f.is_file() or f.is_symlink():
+                    z.write(f.resolve(), f"models/{sub}/{f.name}")
         z.writestr(
-            "UtaLearnNext/models/README-where-this-goes.txt",
-            "把本包解压到 UtaLearnNext 应用目录的同级，得到\n"
-            "  UtaLearnNext/models/whisper-small/model.bin\n"
-            "之后重新启动程序，自定义歌词即可离线语音识别。\n",
+            "models/README-where-this-goes.txt",
+            "把本包解压到 UtaLearnNext 应用目录里，得到\n"
+            "  models/whisper-small/model.bin   语音识别\n"
+            "  models/translate-ja-zh/model.bin  日→中翻译\n"
+            "之后重新启动程序，自定义歌词即可离线对齐与翻译。\n",
         )
     say(f"  {out.stat().st_size / 1048576:.0f} MB")
     return out
@@ -375,15 +386,13 @@ def main() -> int:
                     help="只出核心包，不打包 Chromium 扩展")
     ap.add_argument("--zip-out", default=None, help="ZIP 输出目录（默认与构建目录同级）")
     ap.add_argument("--browsers-dir", default=None, help="Chromium 安装位置（默认构建目录旁）")
-    ap.add_argument("--whisper-pack", action="store_true",
-                    help="只生成 whisper-small 扩展包（版本无关，一次构建长期复用）")
-    ap.add_argument("--whisper-dir", default=None,
-                    help="whisper-small 模型目录（默认从本机 HF 缓存取）")
+    ap.add_argument("--custom-pack", action="store_true",
+                    help="只生成自定义歌词扩展包 whisper+翻译（版本无关，一次构建长期复用）")
     args = ap.parse_args()
 
-    if args.whisper_pack:
+    if args.custom_pack:
         zip_root = Path(args.zip_out).resolve() if args.zip_out else Path(args.out).resolve()
-        make_whisper_zip(zip_root / "UtaLearnNext-whisper-small.zip")
+        make_custom_lyrics_zip(zip_root / "UtaLearnNext-custom-lyrics.zip")
         return 0
 
     if not (ROOT / "frontend" / "dist" / "index.html").exists():

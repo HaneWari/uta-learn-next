@@ -72,7 +72,7 @@ export function BackgroundModal({ current, onClose, onApplied }: Props) {
         </header>
 
         <p className="bghint">
-          只改展示页的背景，配置页和导航栏不变。自定义图片会自动模糊并压暗，
+          只改播放页的背景，配置页和导航栏不变。自定义图片会自动模糊并压暗，
           页内文字和卡片会变成半透明，浮在背景上面。
         </p>
 

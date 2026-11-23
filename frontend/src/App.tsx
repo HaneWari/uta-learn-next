@@ -195,7 +195,7 @@ export default function App() {
             onClick={() => setTab("stage")}
             disabled={!song}
           >
-            展示
+            播放
           </button>
         </div>
 
@@ -217,7 +217,7 @@ export default function App() {
         <button
           className="exportbtn bgbtn"
           onClick={() => setBgOpen(true)}
-          title="更换展示页的背景图"
+          title="更换播放页的背景图"
         >
           设置背景
         </button>

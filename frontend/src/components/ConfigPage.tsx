@@ -500,8 +500,8 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                 ) : (
                   <>
                     <div className="model-banner-text">
-                      <strong>自定义歌词需要语音识别扩展</strong>
-                      <span>一次性下载约 426MB，装好即可离线使用（不随版本更新）</span>
+                      <strong>自定义歌词需要模型扩展包</strong>
+                      <span>含语音识别 + 日中翻译模型，约 490MB，一次性下载即可离线使用（不随版本更新）</span>
                     </div>
                     <div className="model-banner-actions">
                       <button
@@ -522,9 +522,9 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                           >
                             发行版页面
                           </a>
-                          下载 <code>UtaLearnNext-whisper-small.zip</code>，
-                          解压到应用目录得到 <code>models/whisper-small/model.bin</code>，
-                          重启程序即可。
+                          下载 <code>UtaLearnNext-custom-lyrics.zip</code>，
+                          解压至本应用根目录得到 <code>/models</code> 目录，
+                          然后重启应用。
                         </p>
                       </details>
                     </div>

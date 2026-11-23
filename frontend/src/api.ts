@@ -94,8 +94,8 @@ export const api = {
   exportEnv: () =>
     fetch(`${BASE}/api/export/env`).then((r) => json<ExportEnv>(r)),
 
-  fixPlaywright: () =>
-    post<{ job_id: string }>("/api/export/fix-playwright", {}),
+  fixExport: () =>
+    post<{ job_id: string }>("/api/export/fix", {}),
 
   installChromium: () =>
     post<{ job_id: string | null; installed?: boolean }>(

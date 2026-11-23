@@ -146,7 +146,6 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
           clockRef={clockRef}
           offset={songData.meta.time_offset ?? 0}
           transHidden={transHidden}
-          onToggleTransHidden={render ? undefined : toggleTrans}
           onPatch={render ? undefined : onPatchSegment}
         />
         {/* the export recorder must never carry the collapsed bar, so the
@@ -156,6 +155,8 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
             segment={visibleSegments[syncState.displayIndex] ?? null}
             hidden={cardsHidden}
             onToggleHidden={toggleCards}
+            transHidden={transHidden}
+            onToggleTrans={render ? undefined : toggleTrans}
             onPatch={
               render || !onPatchSegment
                 ? undefined

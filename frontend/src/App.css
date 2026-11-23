@@ -3157,3 +3157,26 @@ body {
   gap: 10px;
   margin-top: 18px;
 }
+
+/* spinning ring shown while the env probe / auto-repair runs */
+.env-busy {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.spin {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(242, 98, 31, 0.25);
+  border-top-color: var(--coral-deep);
+  animation: envspin 0.7s linear infinite;
+}
+
+@keyframes envspin {
+  to {
+    transform: rotate(360deg);
+  }
+}

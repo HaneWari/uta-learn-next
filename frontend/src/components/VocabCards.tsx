@@ -480,6 +480,8 @@ export function VocabCards({
   onPatch,
   hidden = false,
   onToggleHidden,
+  transHidden = false,
+  onToggleTrans,
 }: {
   segment: Segment | null;
   onPatch?: (patch: {
@@ -489,6 +491,9 @@ export function VocabCards({
   /** whole-song toggle: collapse the row to a slim bar (still right-clickable) */
   hidden?: boolean;
   onToggleHidden?: () => void;
+  /** whole-song toggle for the lyric gloss — shown in the same ctx menu */
+  transHidden?: boolean;
+  onToggleTrans?: () => void;
 }) {
   const budget = useCardBudget();
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -811,29 +816,17 @@ export function VocabCards({
   }
 
   // the row's own element can only catch right-clicks inside its (clipped) box,
-  // but the spec asks for a much wider zone — the whole strip from just under
-  // the lyric down to just above the transport, edge to edge. Listen at the
-  // document and open the same menu when the click lands inside that bleed.
+  // but the spec asks for the *whole stage* — the lyric line above, the cards,
+  // and the gap down to the transport all open the same menu. Listen at the
+  // document and open it anywhere that isn't a card (a card keeps its own
+  // delete-confirm menu) or an already-open menu.
   useEffect(() => {
-    const BLEED_TOP = 120;   // up toward the lyric line
-    const BLEED_BOTTOM = 96; // down toward the transport bar
     const onDocContext = (e: MouseEvent) => {
-      const row = rowRef.current;
-      if (!row) return;
-      // a right-click on a card or inside an already-open menu keeps its own
-      // behaviour
       const t = e.target as HTMLElement;
+      // a right-click on a card or inside an already-open menu keeps its own
+      // behaviour; the lyric edit box and nav controls keep theirs too
       if (t.closest("[data-card]") || t.closest(".ctx-menu")) return;
-      const r = row.getBoundingClientRect();
-      const inBand =
-        e.clientX >= r.left &&
-        e.clientX <= r.right &&
-        e.clientY >= r.top - BLEED_TOP &&
-        e.clientY <= r.bottom + BLEED_BOTTOM;
-      if (!inBand) return;
-      // already inside the row box? the row's own handler fires too — bail so
-      // we don't set the menu twice
-      if (e.clientY >= r.top && e.clientY <= r.bottom) return;
+      if (t.closest(".lyr-edit") || t.closest("nav, header, .tabbar")) return;
       e.preventDefault();
       setMenu({ x: e.clientX, y: e.clientY, target: null });
     };
@@ -972,6 +965,17 @@ export function VocabCards({
               >
                 {hidden ? "显示词条卡片" : "隐藏词条卡片"}
               </button>
+              {onToggleTrans && (
+                <button
+                  className="ctx-item"
+                  onClick={() => {
+                    closeMenu();
+                    onToggleTrans();
+                  }}
+                >
+                  {transHidden ? "显示中文翻译" : "隐藏中文翻译"}
+                </button>
+              )}
             </>
           )}
           <button className="ctx-item dim" onClick={closeMenu}>

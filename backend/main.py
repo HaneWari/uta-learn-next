@@ -107,6 +107,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# --------------------------------------------------------------------------- #
+# access-log quietening
+# --------------------------------------------------------------------------- #
+# The UI polls `/api/jobs/{id}` every ~1s while a build/export runs and hits a
+# few read-only endpoints on a timer; each one logs a full uvicorn access line
+# and floods the console. Filter those noisy-but-healthy routes so the window
+# only shows requests that actually matter.
+import logging
+
+
+class _QuietAccessFilter(logging.Filter):
+    # only true polling endpoints — list/detail/mutation routes stay visible
+    _NOISY = ("/api/jobs/", "/api/export/env", "/api/export/status",
+              "/api/models/status")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:  # noqa: BLE001
+            return True
+        # access lines look like: `127.0.0.1:12345 - "GET /api/jobs/x HTTP/1.1" 200`
+        for path in self._NOISY:
+            if path in msg:
+                return False
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietAccessFilter())
+
+
 NO_CACHE = {"Cache-Control": "no-store, max-age=0"}
 
 # Where the export's headless browser should reach this server. Override with
@@ -564,20 +594,31 @@ def api_job(jid: str):
 
 
 # --------------------------------------------------------------------------- #
-# whisper model extension pack
+# custom-lyrics extension pack: whisper STT + ja-zh translation
 # --------------------------------------------------------------------------- #
-# The custom-lyrics path needs a bundled speech model under `models/`. It is
-# never pulled from HuggingFace: the config page offers a one-click install
-# that fetches the version-independent `whisper-small` zip off the *latest*
-# GitHub release of this repo and unpacks it next to the app.
+# The custom-lyrics path needs two bundled models under `models/` — the
+# whisper STT model and the ja-zh translation model. Neither is ever pulled
+# from HuggingFace: the config page offers a one-click install that fetches
+# the version-independent extension zip off the *latest* GitHub release of
+# this repo and unpacks it next to the app.
 
 GITHUB_REPO = "HaneWari/uta-learn-next"
-WHISPER_ASSET = "UtaLearnNext-whisper-small.zip"
+CUSTOM_ASSET = "UtaLearnNext-custom-lyrics.zip"
 _WHISPER_NAME = "whisper-small"
+_TRANSLATE_NAME = "translate-ja-zh"
 
 
 def _whisper_model_dir() -> Path:
     return APP_ROOT / "models" / _WHISPER_NAME
+
+
+def _translate_model_dir() -> Path:
+    return APP_ROOT / "models" / _TRANSLATE_NAME
+
+
+def _translate_installed() -> bool:
+    d = _translate_model_dir()
+    return d.is_dir() and (d / "model.bin").exists()
 
 
 def _whisper_installed() -> bool:
@@ -585,28 +626,36 @@ def _whisper_installed() -> bool:
     return d.is_dir() and (d / "model.bin").exists()
 
 
+def _custom_lyrics_installed() -> bool:
+    """The pack is only 'installed' when *both* models are in place — a
+    whisper-only folder would silently lose the 中文翻译 option."""
+    return _whisper_installed() and _translate_installed()
+
+
 @app.get("/api/models/status")
 def api_model_status():
-    return {"installed": _whisper_installed(),
-            "path": str(_whisper_model_dir()),
-            "asset": WHISPER_ASSET}
+    return {"installed": _custom_lyrics_installed(),
+            "whisper": _whisper_installed(),
+            "translate": _translate_installed(),
+            "path": str(APP_ROOT / "models"),
+            "asset": CUSTOM_ASSET}
 
 
-def _latest_whisper_url() -> str:
-    """Stable download URL of the whisper zip on the newest release.
+def _latest_custom_url() -> str:
+    """Stable download URL of the custom-lyrics zip on the newest release.
 
     ``releases/latest/download/<asset>`` redirects to the newest release's
     asset without touching the API, so it is immune to the anonymous GitHub
     API rate limit that would otherwise 403 the install on a busy day.
     """
     return (f"https://github.com/{GITHUB_REPO}/releases/latest/download/"
-            f"{WHISPER_ASSET}")
+            f"{CUSTOM_ASSET}")
 
 
 @app.post("/api/models/install")
 def api_model_install():
-    """Download + unpack the whisper extension pack in the background."""
-    if _whisper_installed():
+    """Download + unpack the custom-lyrics extension pack in the background."""
+    if _custom_lyrics_installed():
         return {"job_id": None, "installed": True}
     jid = jobs.create("model-install")
 
@@ -616,8 +665,8 @@ def api_model_install():
         import httpx
 
         progress(0.05, "查询最新发行版…")
-        url = _latest_whisper_url()
-        progress(0.10, "下载模型扩展包（约 426MB，请稍候）…")
+        url = _latest_custom_url()
+        progress(0.10, "下载自定义歌词扩展包（约 500MB，请稍候）…")
         buf = io.BytesIO()
         with httpx.Client(timeout=None, follow_redirects=True) as c:
             with c.stream("GET", url) as r:
@@ -630,15 +679,14 @@ def api_model_install():
                     if total:
                         # download spans 10%–80% of the job
                         progress(0.10 + 0.70 * got / total,
-                                 f"下载模型扩展包… {got // 1048576}MB")
+                                 f"下载自定义歌词扩展包… {got // 1048576}MB")
         progress(0.85, "解压到 models/…")
         dest = APP_ROOT / "models"
         dest.mkdir(parents=True, exist_ok=True)
         buf.seek(0)
         with zipfile.ZipFile(buf) as z:
-            # the zip carries a `UtaLearnNext/` wrapper (same as the core and
-            # chromium packs); strip it so `…/models/whisper-small/` lands
-            # inside the app folder no matter where the user unzipped it
+            # the zip now lays files directly under `models/` — no wrapper to
+            # strip; older `UtaLearnNext/` prefixes are still tolerated
             for member in z.namelist():
                 rel = member[len("UtaLearnNext/"):] \
                     if member.startswith("UtaLearnNext/") else member
@@ -653,8 +701,10 @@ def api_model_install():
                     shutil.copyfileobj(src, dst)
         if not _whisper_installed():
             raise RuntimeError("解压后未找到 models/whisper-small/model.bin")
+        if not _translate_installed():
+            raise RuntimeError("解压后未找到 models/translate-ja-zh/model.bin")
         progress(0.98, "安装完成")
-        return {"installed": True, "path": str(_whisper_model_dir())}
+        return {"installed": True, "path": str(APP_ROOT / "models")}
 
     jobs.run(jid, work)
     return {"job_id": jid}
@@ -697,42 +747,79 @@ def api_export_env():
     return export.env_check()
 
 
-@app.post("/api/export/fix-playwright")
-def api_export_fix_playwright():
-    """Try to repair the playwright runtime: pip-install the package and pull
-    its matching chromium build. Cheap when already present, a real fix when
-    the package was stripped or its browser download was interrupted.
+@app.post("/api/export/fix")
+def api_export_fix():
+    """Repair whatever the env probe flagged, in one background job.
+
+    Each missing piece gets its own fix — ffmpeg is dropped into `bin/` from
+    the same slim build the portable packer uses, playwright is pip-installed
+    and its matching chromium pulled, then the browser is re-probed. A fix
+    that leaves `state == "ok"` hands control back to the export right away;
+    one that still can't launch the browser reports `needs_extension` so the
+    modal can promote the Chromium pack.
     """
     jid = jobs.create("export-fix")
 
     def work(progress):
+        import io
         import subprocess
         import sys
+        import zipfile
+        import httpx
 
-        progress(0.1, "检查 playwright 包…")
-        try:
-            import playwright  # noqa: F401
-            progress(0.4, "playwright 已安装，补装浏览器…")
-        except Exception:  # noqa: BLE001
-            progress(0.15, "安装 playwright …")
+        c = export.env_check()
+        checks = c["checks"]
+
+        # 1. ffmpeg — the mux tool the packer puts in bin/; a missing copy just
+        #    needs the slim essentials build unzipped next to the app.
+        if not checks["ffmpeg"]:
+            progress(0.08, "下载 ffmpeg…")
+            try:
+                from tools.build_portable import FFMPEG_ZIP  # noqa: E402
+            except Exception:  # noqa: BLE001
+                FFMPEG_ZIP = ("https://www.gyan.dev/ffmpeg/builds/"
+                              "ffmpeg-release-essentials.zip")
+            bin_dir = APP_ROOT / "bin"
+            bin_dir.mkdir(parents=True, exist_ok=True)
+            buf = io.BytesIO()
+            with httpx.Client(timeout=None, follow_redirects=True) as hc:
+                with hc.stream("GET", FFMPEG_ZIP) as r:
+                    r.raise_for_status()
+                    for chunk in r.iter_bytes(1 << 20):
+                        buf.write(chunk)
+            buf.seek(0)
+            with zipfile.ZipFile(buf) as z:
+                for member in z.namelist():
+                    name = Path(member).name
+                    if name in ("ffmpeg.exe", "ffprobe.exe"):
+                        with z.open(member) as src, (bin_dir / name).open("wb") as dst:
+                            shutil.copyfileobj(src, dst)
+            progress(0.3, "ffmpeg 已就位")
+
+        # 2. playwright — the package itself, then a browser it can drive.
+        progress(0.4, "检查 Playwright…")
+        if not checks["playwright"]:
+            progress(0.45, "安装 playwright …")
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-q", "playwright"],
                 check=True, capture_output=True)
-            progress(0.4, "playwright 装好，下载浏览器…")
+        if not checks["browser_launch"]:
+            progress(0.55, "下载 Chromium（约 130MB，请稍候）…")
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "playwright", "install", "chromium"],
+                    check=True, capture_output=True, env=dict(os.environ))
+            except Exception:  # noqa: BLE001
+                # playwright's own download being blocked is exactly the case
+                # the bundled pack exists for — report, don't fail hard
+                progress(0.8, "playwright 下载浏览器失败，改用扩展包…")
 
-        progress(0.55, "下载 Chromium（约 130MB，请稍候）…")
-        subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            check=True, capture_output=True, env=dict(os.environ))
-
-        progress(0.9, "验证浏览器…")
+        progress(0.9, "验证环境…")
         c = export.env_check()
-        if not c["checks"]["browser_launch"]:
-            raise RuntimeError(
-                "playwright 已修复但浏览器仍无法启动：" +
-                (c["checks"]["launch_error"] or "未知原因"))
         progress(0.98, "完成")
-        return {"ok": True, "env": c}
+        return {"ok": c["ok"], "state": c["state"], "env": c,
+                "needs_restart": c["ok"],
+                "needs_extension": c["state"] in ("no_browser", "no_playwright")}
 
     jobs.run(jid, work)
     return {"job_id": jid}

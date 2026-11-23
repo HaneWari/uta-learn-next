@@ -16,8 +16,6 @@ interface LyricsDisplayProps {
   onPatch?: (segId: number, body: Partial<Segment>) => Segment | undefined;
   /** hide the Chinese gloss; the dataset flag is the default, the URL wins */
   transHidden?: boolean;
-  /** toggle `trans_hidden` on the dataset (disabled in render mode) */
-  onToggleTransHidden?: () => void;
 }
 
 /** The text the listener actually sees: the override wins over the aligned
@@ -164,28 +162,10 @@ function NextLine({ segment }: { segment: Segment }) {
   );
 }
 
-export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false, onToggleTransHidden }: LyricsDisplayProps) {
+export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false }: LyricsDisplayProps) {
   const activeRef = useRef<HTMLSpanElement | null>(null);
   const cur = segments[syncState.displayIndex];
   const next = segments[syncState.displayIndex + 1] ?? null;
-  /* right-click on the lyric area toggles the gloss, same ctx-menu styling
-     as the card row */
-  const [lyrMenu, setLyrMenu] = useState<{ x: number; y: number } | null>(null);
-
-  // dismiss the lyric ctx-menu on any outside click / scroll, like the card row
-  useEffect(() => {
-    if (!lyrMenu) return;
-    const close = () => setLyrMenu(null);
-    window.addEventListener("mousedown", close);
-    window.addEventListener("blur", close);
-    window.addEventListener("resize", close);
-    return () => {
-      window.removeEventListener("mousedown", close);
-      window.removeEventListener("blur", close);
-      window.removeEventListener("resize", close);
-    };
-  }, [lyrMenu]);
-
   /* ---- lyric editing: double-click to fix the line, right-click to hide it.
      Only the sung text and its Chinese gloss are editable — romaji and the
      word timings come from alignment and are left alone. ---- */
@@ -281,35 +261,7 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
   return (
     <div
       className="stage"
-      onContextMenu={(e) => {
-        // the card row runs its own right-click menu; keep this one to the
-        // lyric area only so a click near the cards still opens card options
-        if ((e.target as HTMLElement).closest(".vocab")) return;
-        e.preventDefault();
-        setLyrMenu({ x: e.clientX, y: e.clientY });
-      }}
     >
-      {lyrMenu && (
-        <div
-          className="ctx-menu"
-          style={{ left: lyrMenu.x, top: lyrMenu.y }}
-          role="menu"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <button
-            className="ctx-item"
-            onClick={() => {
-              setLyrMenu(null);
-              onToggleTransHidden?.();
-            }}
-          >
-            {transHidden ? "显示中文翻译" : "隐藏中文翻译"}
-          </button>
-          <button className="ctx-item dim" onClick={() => setLyrMenu(null)}>
-            取消
-          </button>
-        </div>
-      )}
       <div className={`next-block${next ? "" : " blank"}`}>
         <span className="next-label">{next ? "next" : ""}</span>
         {next ? (

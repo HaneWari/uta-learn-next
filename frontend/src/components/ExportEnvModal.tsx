@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, waitForJob } from "../api";
 import type { ExportEnv, Job } from "../types";
 
@@ -8,29 +8,37 @@ interface Props {
   onClose: () => void;
 }
 
-type Phase = "probing" | "ready" | "fixing" | "installing" | "needs_restart";
+type Phase = "probing" | "ready" | "fixing" | "installing" | "done_ok" | "done_fail";
 
 /**
  * Pre-flight check for video export. The user only sees it when something is
  * actually wrong — a green probe closes itself and starts the export.
  *
- * The ladder of fixes, cheapest first:
- *   1. playwright missing/broken → repair it (pip + `playwright install`)
- *   2. browser won't launch     → download the bundled-Chromium extension pack
- * Anything that drops a browser on disk asks for a restart so the resolver
- * picks it up cleanly.
+ * The ladder of fixes, cheapest first, driven by one 自动修复 button:
+ *   missing ffmpeg    → drop the slim build into bin/
+ *   playwright broken  → pip install + pull its chromium
+ *   nothing launches   → promote the bundled-Chromium extension pack
+ * Fixing always re-probes on its own (no separate 重新检测 button); a green
+ * result means the user just needs to restart.
  */
 export function ExportEnvModal({ onReady, onClose }: Props) {
   const [env, setEnv] = useState<ExportEnv | null>(null);
   const [phase, setPhase] = useState<Phase>("probing");
   const [job, setJob] = useState<Job | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [fixedOk, setFixedOk] = useState(false);
+  const mounted = useRef(true);
+
+  useEffect(() => () => {
+    mounted.current = false;
+  }, []);
 
   const probe = useCallback(async () => {
     setPhase("probing");
     setErr(null);
     try {
       const e = await api.exportEnv();
+      if (!mounted.current) return;
       setEnv(e);
       if (e.ok) {
         onReady();
@@ -38,6 +46,7 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
         setPhase("ready");
       }
     } catch (e2) {
+      if (!mounted.current) return;
       setErr(e2 instanceof Error ? e2.message : String(e2));
       setPhase("ready");
     }
@@ -47,55 +56,62 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
     void probe();
   }, [probe]);
 
-  const runJob = useCallback(
-    async (start: () => Promise<{ job_id: string | null }>) => {
-      setErr(null);
-      setJob(null);
-      try {
-        const { job_id } = await start();
-        if (!job_id) {
-          // already satisfied — reprobe; a green result auto-continues
-          await probe();
-          return true;
-        }
-        const done = await waitForJob(job_id, setJob, 900);
-        if (done.status === "error") {
-          setErr(done.error ?? "操作失败");
-          return false;
-        }
-        return true;
-      } catch (e) {
-        setErr(e instanceof Error ? e.message : String(e));
-        return false;
-      }
-    },
-    [probe],
-  );
-
-  const fixPlaywright = useCallback(async () => {
+  // One-button auto-repair: run the unified fix job, then re-probe. The job
+  // itself drops ffmpeg/playwright/chromium as needed; a still-broken browser
+  // afterwards is the signal to promote the extension pack.
+  const fix = useCallback(async () => {
     setPhase("fixing");
-    const ok = await runJob(() => api.fixPlaywright());
-    if (ok) {
-      // a repaired runtime may still need a fresh import context — safest is a
-      // restart, but if the probe is already green we can continue right away
-      await probe();
-      setPhase((p) => (p === "fixing" ? "ready" : p));
-    } else {
-      setPhase("ready");
+    setErr(null);
+    setJob(null);
+    try {
+      const { job_id } = await api.fixExport();
+      const done = await waitForJob(job_id, setJob, 900);
+      if (!mounted.current) return;
+      if (done.status === "error") {
+        setErr(done.error ?? "修复失败");
+        setPhase("done_fail");
+        return;
+      }
+      const e = await api.exportEnv();
+      if (!mounted.current) return;
+      setEnv(e);
+      setFixedOk(e.ok);
+      setPhase(e.ok ? "done_ok" : "done_fail");
+      if (!e.ok) setErr(null);
+    } catch (e2) {
+      if (!mounted.current) return;
+      setErr(e2 instanceof Error ? e2.message : String(e2));
+      setPhase("done_fail");
     }
-  }, [runJob, probe]);
+  }, []);
 
   const installChromium = useCallback(async () => {
     setPhase("installing");
-    const ok = await runJob(() => api.installChromium());
-    if (ok) {
-      // the resolver caches nothing, but the launcher's env only sets
-      // PLAYWRIGHT_BROWSERS_PATH at startup — ask for a restart to be safe
-      setPhase("needs_restart");
-    } else {
-      setPhase("ready");
+    setErr(null);
+    setJob(null);
+    try {
+      const { job_id } = await api.installChromium();
+      if (!job_id) {
+        await probe();
+        return;
+      }
+      const done = await waitForJob(job_id, setJob, 900);
+      if (!mounted.current) return;
+      if (done.status === "error") {
+        setErr(done.error ?? "安装失败");
+        setPhase("done_fail");
+        return;
+      }
+      // a browser binary dropped on disk needs a restart before the resolver
+      // picks it up — that IS the success path here
+      setFixedOk(true);
+      setPhase("done_ok");
+    } catch (e2) {
+      if (!mounted.current) return;
+      setErr(e2 instanceof Error ? e2.message : String(e2));
+      setPhase("done_fail");
     }
-  }, [runJob]);
+  }, [probe]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -111,6 +127,7 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
   const c = env?.checks;
   const busy = phase === "fixing" || phase === "installing" || phase === "probing";
   const pct = job ? Math.round(job.progress * 100) : 0;
+  const fixFailed = phase === "done_fail" && !fixedOk;
 
   return (
     <div className="bgmask" role="dialog" aria-modal="true" aria-label="导出环境检查">
@@ -123,22 +140,28 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
         </header>
 
         {phase === "probing" && (
-          <p className="bghint">正在检查导出所需环境…</p>
+          <p className="bghint env-busy">
+            <span className="spin" aria-hidden="true" />
+            正在检查导出所需环境…
+          </p>
         )}
 
-        {phase === "needs_restart" && (
+        {phase === "done_ok" && (
           <>
             <p className="bghint">
-              ✅ Chromium 扩展包已装好。请<b>重启 Uta Learn Next</b>
-              后再点「导出视频」，新浏览器才会生效。
+              ✅ {fixedOk ? "修复完成，环境已就绪。" : "环境已就绪。"}
+              请<b>重启 Uta Learn Next</b> 后再点「导出视频」。
             </p>
-            <div className="env-actions">
-              <button className="btn primary" onClick={onClose}>我知道了</button>
-            </div>
           </>
         )}
 
-        {phase !== "probing" && phase !== "needs_restart" && env && (
+        {phase === "done_fail" && (
+          <p className="env-fail">
+            ⚠ 自动修复未成功{err ? `：${err}` : "。请安装 Chromium 扩展包。"}
+          </p>
+        )}
+
+        {phase !== "probing" && env && phase !== "done_ok" && (
           <>
             <ul className="env-checks">
               <li className={c?.playwright ? "ok" : "bad"}>
@@ -164,69 +187,60 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
               </li>
             </ul>
 
-            {(env.state === "no_playwright" || env.state === "no_browser") && (
+            {phase === "ready" && env.state !== "ok" && (
               <p className="bghint">
-                {env.state === "no_playwright"
-                  ? "缺少 Playwright 运行库。可以先让程序自动安装修复；修复不了再装 Chromium 扩展包。"
-                  : c?.bundled_chromium
-                    ? "已解压 Chromium 扩展包，但浏览器仍启动失败——可先尝试修复 Playwright 运行库，或重新安装扩展包。"
-                    : "没找到能启动的 Chromium 内核浏览器（Chrome / Edge / Brave / 360 / QQ 等均可）。可以先让程序自动修复，或安装内置 Chromium 扩展包。"}
-              </p>
-            )}
-            {env.state === "no_ffmpeg" && (
-              <p className="bghint">
-                浏览器正常，但缺少 <b>ffmpeg</b>。请把 ffmpeg 放到应用目录的{" "}
-                <code>bin/</code> 下或加入系统 PATH 后重启。
+                {env.state === "no_ffmpeg"
+                  ? "缺少 ffmpeg，点「自动修复」即可自动下载安装。"
+                  : "点「自动修复」让程序装好缺失的组件；修复不了再装内置 Chromium 扩展包。"}
               </p>
             )}
 
-            {err && <p className="env-fail">⚠ {err}</p>}
-
-            {busy ? (
+            {busy && (
               <div className="job">
                 <div className="job-bar">
                   <div className="job-fill" style={{ width: `${pct}%` }} />
                 </div>
-                <span className="job-msg">
-                  {job?.message ?? "处理中…"}
-                  {job ? ` · ${pct}%` : ""}
+                <span className="job-msg env-busy">
+                  <span className="spin" aria-hidden="true" />
+                  {phase === "fixing" ? "自动修复中" : "安装中"}
+                  {job?.message ? ` · ${job.message}` : ""}
+                  {job ? ` ${pct}%` : ""}
                 </span>
               </div>
-            ) : (
+            )}
+
+            {!busy && (
               <div className="env-actions">
-                {(env.state === "no_playwright" || env.state === "no_browser") && (
-                  <button className="btn primary" onClick={() => void fixPlaywright()}>
-                    自动安装修复
-                  </button>
-                )}
-                {(env.state === "no_browser" || env.state === "no_playwright") && (
+                {(env.state === "no_playwright" ||
+                  env.state === "no_browser" ||
+                  env.state === "no_ffmpeg") && (
                   <button
-                    className="btn"
-                    onClick={() => void installChromium()}
+                    className={`btn${fixFailed ? "" : " primary"}`}
+                    onClick={() => void fix()}
                   >
-                    {c?.bundled_chromium ? "重新下载 Chromium 扩展包" : "下载安装 Chromium 扩展包"}
+                    自动修复
                   </button>
                 )}
-                <button className="btn" onClick={() => void probe()}>
-                  重新检测
-                </button>
-                <button className="btn" onClick={onClose}>
-                  取消
+                <button
+                  className={`btn${fixFailed ? " primary" : ""}`}
+                  onClick={() => void installChromium()}
+                >
+                  {c?.bundled_chromium ? "重装 Chromium 扩展包" : "安装 Chromium 扩展包"}
                 </button>
               </div>
             )}
           </>
         )}
 
-        {phase !== "probing" && phase !== "needs_restart" && !env && (
+        {phase !== "probing" && phase !== "done_ok" && !env && (
           <>
             <p className="bghint">环境检查失败{err ? `：${err}` : ""}</p>
             <div className="env-actions">
+              <button className="btn primary" onClick={() => void fix()}>
+                自动修复
+              </button>
               <button className="btn" onClick={() => void probe()}>
                 重新检测
-              </button>
-              <button className="btn" onClick={onClose}>
-                取消
               </button>
             </div>
           </>
