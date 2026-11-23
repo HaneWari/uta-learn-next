@@ -91,6 +91,7 @@ export interface SongMeta {
   /** seconds the lyric timeline is shifted against the audio; positive plays
    *  the highlight later, negative earlier (-2 … 2, one decimal) */
   time_offset?: number;
+  trans_hidden?: boolean;
 }
 
 export interface SongData {

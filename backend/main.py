@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import export, fallback, jobs, retime
+from app import translate as translate_mod
 from app.builder import _is_credit
 from app.builder import build as build_song
 from app.builder import slugify
@@ -313,6 +314,35 @@ def _attach_translation(data: dict, translation) -> None:
             seg["translation_zh"] = best[1]
 
 
+def _meta_flag(name: str, key: str) -> bool:
+    """Read a boolean meta flag off a dataset without trusting the caller."""
+    path = dataset(name) / "song_data.json"
+    try:
+        return bool(json.loads(path.read_text(encoding="utf-8"))
+                    .get("meta", {}).get(key))
+    except Exception:
+        return False
+
+
+def _mmss(raw) -> float:
+    """Parse a "m:ss" (or plain seconds) crop point; anything else is 0."""
+    if raw is None or raw == "":
+        return 0.0
+    if isinstance(raw, (int, float)):
+        return max(0.0, float(raw))
+    s = str(raw).strip()
+    if ":" in s:
+        try:
+            m, sec = s.split(":", 1)
+            return max(0.0, int(m) * 60 + float(sec))
+        except ValueError:
+            return 0.0
+    try:
+        return max(0.0, float(s))
+    except ValueError:
+        return 0.0
+
+
 # --------------------------------------------------------------------------- #
 # config API
 # --------------------------------------------------------------------------- #
@@ -403,54 +433,53 @@ async def api_build(payload: dict):
         # recording, and then the source's per-character timestamps beat any
         # estimate. Only re-align when the lengths disagree — that means a
         # different edit (TV size, live take, own cut).
-        use_audio_timing = False
+        # Manual version matching: the source's own per-character timeline is
+        # authoritative, but a different edit (TV-size cut, a trimmed intro,
+        # a live take) makes it disagree with the uploaded file. Rather than
+        # auto-aligning (a whisper pass over a whole song just to learn an
+        # offset), the user supplies the cut point for whichever side is
+        # longer. `lyric_start` says where in the *source* timeline the audio
+        # begins (source longer, intro skipped); `audio_start` says where in
+        # the *audio* the lyric timeline begins (audio longer, instrumental
+        # intro). Seconds are "m:ss" strings straight from the config page.
+        lyric_start = _mmss(payload.get("lyric_start"))
+        audio_start = _mmss(payload.get("audio_start"))
+
         if audio is not None:
             got = fallback.probe_duration(audio)
-            use_audio_timing = not (song.duration and abs(got - song.duration) <= 2.0)
-
-        if use_audio_timing:
-            lines = _lyric_lines(parsed, title, artist, source_song=song)
-            if len(lines) < 2:
-                raise RuntimeError("这个来源的歌词行数太少，无法对齐")
-
-            # First try to *keep* the source's per-character timing and just
-            # correct the version difference (offset and/or speed). Only if that
-            # fit is unreliable do we re-time the text from scratch.
-            fitted = _try_retime(parsed, audio, progress)
-            if fitted is not None:
-                progress(0.80, f"套用源逐字时间轴：{retime.describe(fitted)}")
-                data = build_song(parsed, {
-                    "title": title, "artist": artist,
-                    "youtube_url": "", "language": "ja",
-                    "whisperx_model": "none",
-                    "align_model": f"{label} 逐字时间戳 + 自动重对时",
-                    "vocal_separation": "none",
-                    "source": f"{label}（逐字）+ 自动重对时",
-                    "source_kind": parsed.kind,
-                    "retime": {k: fitted[k] for k in ("a", "b", "anchors", "residual")},
-                }, credit_names={"title": song.title, "artist": song.artist},
-                    time_scale=fitted["b"], time_shift=fitted["a"],
-                    max_time=fallback.probe_duration(audio))
-                if not data["segments"]:
-                    fitted = None  # transform pushed everything out of range
-
-            if fitted is None:
-                progress(0.20, f"无法重对时，改用你的音频对齐 {len(lines)} 行…")
-                data = fallback.build_from_audio(audio, lines, {
-                    "title": title, "artist": artist,
-                    "youtube_url": "", "language": "ja",
-                    "whisperx_model": os.environ.get("UTALEARN_WHISPER", "large-v3"),
-                    "align_model": f"{label} 歌词 + whisper 切片转写 / 假名全局对齐",
-                    "vocal_separation": "none",
-                    "source": f"{label}（歌词）+ 本机音频（时间轴）",
-                    "source_kind": "estimated",
-                }, progress=progress)
-                _attach_translation(data, parsed.translation)
-        else:
-            if audio is not None:
-                progress(0.55, f"音频与源版本一致，直接用{label}逐字时间戳…")
+            if song.duration and got < song.duration - 2.0:
+                # audio shorter: the source describes a longer recording, drop
+                # what the file does not reach
+                time_shift = -lyric_start
+                max_time = got
+                align_note = f"{label} 逐字时间戳 · 音频较短手动裁剪"
+                progress(0.55, f"音频较短，歌词时间轴从 {lyric_start:g}s 起裁到 {got:g}s…")
+            elif song.duration and got > song.duration + 2.0:
+                # audio longer: it has extra room the lyric timeline never
+                # fills (an instrumental head/tail) — shift the whole lyric
+                # clock forward instead of guessing where lines land
+                time_shift = audio_start
+                max_time = got
+                align_note = f"{label} 逐字时间戳 · 音频较长手动裁剪"
+                progress(0.55, f"音频较长，歌词时间轴整体后移 {audio_start:g}s…")
             else:
+                time_shift = 0.0
+                max_time = None
+                align_note = f"{label} 逐字时间戳"
                 progress(0.55, f"分词并生成 {len(parsed.lines)} 行…")
+
+            data = build_song(parsed, {
+                "title": title, "artist": artist,
+                "youtube_url": "", "language": "ja",
+                "whisperx_model": "none",
+                "align_model": align_note,
+                "vocal_separation": "none",
+                "source": label,
+                "source_kind": parsed.kind,
+            }, credit_names={"title": song.title, "artist": song.artist},
+                time_shift=time_shift, max_time=max_time)
+        else:
+            progress(0.55, f"分词并生成 {len(parsed.lines)} 行…")
             data = build_song(parsed, {
                 "title": title, "artist": artist,
                 "youtube_url": "", "language": "ja",
@@ -501,6 +530,21 @@ async def api_build_text(payload: dict):
             "source": "本地上传 + whisper",
             "source_kind": "estimated",
         }, progress=progress)
+        # translation is part of the build job, not a separate step: it only
+        # runs when the user asked for it, after the timing is already solved,
+        # so a missing translate pack never wastes a whisper pass
+        if payload.get("translate"):
+            progress(0.93, f"翻译 {len(data['segments'])} 行…")
+            try:
+                zh = translate_mod.translate_lines(
+                    [s["text"] for s in data["segments"]])
+                for seg, line in zip(data["segments"], zh):
+                    if line:
+                        seg["translation_zh"] = line
+            except RuntimeError as e:
+                # a missing pack is a soft failure: the dataset is already
+                # built, the listener just gets no gloss
+                progress(0.95, f"翻译失败：{e}")
         _save_dataset(name, data, audio)
         return {"name": name, "title": title, "artist": artist,
                 "segments": len(data["segments"]),
@@ -655,7 +699,7 @@ _WRITABLE_KEYS = {
 # shifts the whole lyric timeline against the audio (positive = lyrics later);
 # it lives in the dataset so the export recorder, which reloads song_data.json,
 # plays with the same correction the user tuned by ear.
-_META_KEYS = {"time_offset"}
+_META_KEYS = {"time_offset", "trans_hidden"}
 TIME_OFFSET_MAX = 2.0
 
 
@@ -736,8 +780,14 @@ def _patch_meta(name: str, patch: dict) -> dict:
             meta.pop("time_offset", None)
         else:
             meta["time_offset"] = value
+    if "trans_hidden" in patch:
+        if patch["trans_hidden"]:
+            meta["trans_hidden"] = True
+        else:
+            meta.pop("trans_hidden", None)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return {"time_offset": meta.get("time_offset", 0.0)}
+    return {"time_offset": meta.get("time_offset", 0.0),
+            "trans_hidden": bool(meta.get("trans_hidden"))}
 
 
 def _reline_grammar(text: str) -> list[dict] | None:
@@ -805,6 +855,9 @@ async def api_export(payload: dict):
     # the recorder opens a fresh browser profile that can't see the user's
     # localStorage — the hidden-cards flag has to be carried in the page URL
     hide_cards = bool(payload.get("hide_cards"))
+    # translation visibility is a dataset-level choice the recorder's fresh
+    # profile also has to see — read the flag the stage toggles, not the body
+    hide_trans = _meta_flag(name, "trans_hidden")
 
     ok, why = export.available()
     if not ok:
@@ -820,7 +873,8 @@ async def api_export(payload: dict):
             out=out,
             duration=duration,
             progress=progress,
-            extra_query="&hidecards=1" if hide_cards else "",
+            extra_query=("&hidecards=1" if hide_cards else "")
+            + ("&hidetrans=1" if hide_trans else ""),
         )
         return {"file": out.name, "url": f"/api/exports/{out.name}",
                 "size": out.stat().st_size, "duration": duration,

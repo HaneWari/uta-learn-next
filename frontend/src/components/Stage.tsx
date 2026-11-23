@@ -21,9 +21,11 @@ interface Props {
     segId: number,
     body: Partial<Segment>,
   ) => Segment | undefined;
+  /** persist the translation visibility flag (disabled in render mode) */
+  onPatchTrans?: (hidden: boolean) => void;
 }
 
-export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment }: Props) {
+export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment, onPatchTrans }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   // song-wide card visibility, remembered per dataset so a listener who only
   // wants the lyrics can switch the vocab row off (and the export matches)
@@ -43,6 +45,27 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
       return next;
     });
   }, [song]);
+
+  /* same idea for the translation: a dataset meta flag the export also
+     reads, so the video shows exactly the gloss state the listener left */
+  const [transHidden, setTransHidden] = useState(() => {
+    const q = new URLSearchParams(window.location.search).get("hidetrans");
+    if (q !== null) return q === "1";
+    return !!songData.meta.trans_hidden;
+  });
+  // the dataset is the source of truth once it loads — a stale local guess
+  // shouldn't stick around
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("hidetrans");
+    if (q === null) setTransHidden(!!songData.meta.trans_hidden);
+  }, [songData.meta.trans_hidden]);
+  const toggleTrans = useCallback(() => {
+    setTransHidden((h) => {
+      const next = !h;
+      onPatchTrans?.(next);
+      return next;
+    });
+  }, []);
   // hidden lines are left in the dataset but skipped everywhere the timeline
   // is consumed — the sync engine, the lyric display and the vocab row all
   // see the same filtered segment list, so a removed line just never plays.
@@ -122,6 +145,8 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
           audioRef={audioRef}
           clockRef={clockRef}
           offset={songData.meta.time_offset ?? 0}
+          transHidden={transHidden}
+          onToggleTransHidden={render ? undefined : toggleTrans}
           onPatch={render ? undefined : onPatchSegment}
         />
         {/* the export recorder must never carry the collapsed bar, so the

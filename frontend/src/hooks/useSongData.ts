@@ -92,5 +92,17 @@ export function useSongData(song: string | null) {
     [song],
   );
 
-  return { songData, error, loading, patch, setTimeOffset };
+  /** Toggle the song-wide translation visibility; `persist` saves it to meta. */
+  const setTransHidden = useCallback(
+    (hidden: boolean, persist: boolean): Promise<void> => {
+      setSongData((prev) =>
+        prev ? { ...prev, meta: { ...prev.meta, trans_hidden: hidden || undefined } } : prev,
+      );
+      if (!persist || !song) return Promise.resolve();
+      return api.setTransHidden(song, hidden).then(() => undefined);
+    },
+    [song],
+  );
+
+  return { songData, error, loading, patch, setTimeOffset, setTransHidden };
 }

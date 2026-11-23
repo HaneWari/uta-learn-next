@@ -37,5 +37,8 @@ Thumbs.db
 dist-portable/
 release-v*/
 
+# 版本无关扩展包解压出来的模型（whisper / 翻译），走 release 扩展包分发
+models/
+
 # 临时诊断产物（截图/日志）
 tools/_*

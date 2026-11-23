@@ -32,6 +32,7 @@ export default function App() {
     loading,
     patch: patchSegment,
     setTimeOffset,
+    setTransHidden,
   } = useSongData(song);
 
   const refresh = useCallback(() => {
@@ -264,6 +265,7 @@ export default function App() {
             hasAudio={current?.has_audio}
             background={background}
             onPatchSegment={patchSegment}
+            onPatchTrans={(hidden) => void setTransHidden(hidden, true)}
           />
         )}
       </div>

@@ -53,6 +53,9 @@ REQUIREMENTS = [
     "fugashi>=1.3",
     "unidic-lite>=1.0",
     "faster-whisper>=1.0",
+    # ja-zh lyric translation runs on a bundled int8 CT2 model; we only need
+    # sentencepiece for the .spm tokenisers, not the full transformers stack.
+    "sentencepiece>=0.2",
     "playwright>=1.44",
 ]
 

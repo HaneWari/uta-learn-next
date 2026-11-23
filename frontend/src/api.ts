@@ -53,7 +53,13 @@ export const api = {
 
   buildFromSource: (
     song: SearchHit,
-    opts: { upload_id?: string; title?: string; artist?: string },
+    opts: {
+      upload_id?: string;
+      title?: string;
+      artist?: string;
+      lyric_start?: string;
+      audio_start?: string;
+    },
   ) => post<{ job_id: string; name: string }>("/api/build", { song, ...opts }),
 
   buildFromText: (payload: {
@@ -61,6 +67,7 @@ export const api = {
     lyrics: string;
     title?: string;
     artist?: string;
+    translate?: boolean;
   }) => post<{ job_id: string; name: string }>("/api/build-text", payload),
 
   job: (id: string) => fetch(`${BASE}/api/jobs/${id}`).then((r) => json<Job>(r)),
@@ -116,6 +123,14 @@ export const api = {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ time_offset: timeOffset }),
     }).then((r) => json<{ time_offset: number }>(r)),
+
+  /* translation visibility, same meta channel — the export page reads it too */
+  setTransHidden: (name: string, hidden: boolean) =>
+    fetch(`${BASE}/api/songs/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ trans_hidden: hidden }),
+    }).then((r) => json<{ trans_hidden: boolean }>(r)),
 
   /* stage background: stored server-side so the export sees it too */
   background: () =>

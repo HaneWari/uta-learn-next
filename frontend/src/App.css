@@ -915,6 +915,69 @@ body {
   min-width: 0;
 }
 
+/* ---------- manual crop / translate options ---------- */
+
+.crop-box {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(178, 146, 116, 0.45);
+  border-radius: 11px;
+  background: rgba(255, 248, 238, 0.7);
+}
+
+.crop-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  color: #4a3a2b;
+  flex-wrap: wrap;
+}
+
+.crop-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.crop-input input {
+  width: 76px;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 14px;
+  text-align: center;
+  border: 1px solid rgba(178, 146, 116, 0.55);
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #3a2f24;
+}
+
+.crop-input input:focus {
+  outline: 2px solid rgba(190, 148, 104, 0.45);
+  border-color: transparent;
+}
+
+.crop-unit {
+  font-size: 12.5px;
+  color: #8a7460;
+}
+
+.translate-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13.5px;
+  color: #4a3a2b;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.translate-check input {
+  accent-color: #b06a2e;
+  width: 15px;
+  height: 15px;
+}
+
 /* ---------- upload ---------- */
 
 .drop {
