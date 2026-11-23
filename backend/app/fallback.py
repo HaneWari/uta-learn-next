@@ -1,4 +1,4 @@
-"""Fallback timing: whisper word anchors + vocal energy segmentation.
+"""Fallback timing: chunked whisper transcription + global kana alignment.
 
 Used when no lyric source has the song, or the user prefers to build from their
 own audio. The lyrics are the user's (or the source's) text; only the *timing*
@@ -7,14 +7,22 @@ is estimated here.
 Pipeline
 --------
 1. Decode the upload to 16 kHz mono PCM with ffmpeg.
-2. Transcribe with faster-whisper, keeping word-level timestamps.
-3. Align lyric lines to whisper segments with a global monotonic DP, so one bad
-   line can never drag the rest of the timeline out of order. Lines whisper
-   missed (thick choruses) are laid into the gap between placed neighbours.
-4. Inside a line, share the morae across whisper's word spans in proportion to
-   their length, then cut each span where the vocal energy changes — this is the
-   "energy path": each mora carries one vowel nucleus, so cut points land
-   between vowel cores even on legato phrases with no audible onset.
+2. Transcribe in overlapping 30 s windows and keep only each window's trusted
+   middle. Whisper's word timestamps drift badly over a whole song (it was
+   trained on 30 s clips), while inside one short window they stay tight; the
+   discarded window edges are where it guesses words cut in half.
+3. Align *all* lyric kana against *all* transcript kana in one global
+   Needleman–Wunsch pass. Comparing readings rather than text survives whisper
+   writing 時 where the lyric has とき, and one global pass means a line whisper
+   missed can never drag the rest of the timeline out of order.
+4. Every matched kana takes its time from the transcript word it matched;
+   unmatched kana inside a line are interpolated, the ends extrapolated at the
+   line's own singing rate, and lines with no anchors are spread over the gap
+   between their neighbours.
+
+On a benchmark of three songs with source per-character timestamps this lands
+the mean character error around 0.3 s (the previous whole-track + vocal energy
+pipeline: ~1.6 s).
 """
 from __future__ import annotations
 
@@ -31,15 +39,25 @@ from pathlib import Path
 import numpy as np
 
 from .builder import _prefer_kana_lemma
-from .dicts import analyze, enrich, find_grammar, is_content, mora_count
+from .dicts import (analyze, apply_reading_marks, enrich, find_grammar,
+                    is_content, parse_reading_marks)
 
 PUNCT_RE = re.compile(r"[\s、。,.!?！？…「」『』()（）・~〜\-—:;\"'’“”]")
 JP_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
 MATCH_BONUS = 0.55
-HOP = 0.010
-WIN = 0.032
-MIN_DIST = 0.070
-SMOOTH = 3
+
+CHUNK_WIN = 30.0
+CHUNK_EDGE = 6.0
+
+KANA_MATCH = 1.0
+KANA_MISMATCH = -0.6
+KANA_GAP = -0.4
+
+MIN_COVERAGE = 0.3
+DEFAULT_RATE = 0.3
+MIN_RATE, MAX_RATE = 0.15, 0.6
+FIRST_WORD_CAP = 0.5
+ANCHOR_GAP = 4.0
 
 
 # --------------------------------------------------------------------------- #
@@ -77,180 +95,6 @@ def load_wav(path: str | Path) -> tuple[np.ndarray, int]:
 
 
 # --------------------------------------------------------------------------- #
-# energy
-# --------------------------------------------------------------------------- #
-def _frames(x: np.ndarray, sr: int):
-    win = max(1, int(WIN * sr))
-    hop = max(1, int(HOP * sr))
-    n = 1 + max(0, (len(x) - win) // hop)
-    idx = np.arange(win)[None, :] + hop * np.arange(n)[:, None]
-    return x[idx], hop / sr
-
-
-def _db_curve(x: np.ndarray, sr: int) -> tuple[np.ndarray, float]:
-    fr, hop_s = _frames(x, sr)
-    rms = np.sqrt(np.mean(fr.astype(np.float64) ** 2, axis=1) + 1e-12)
-    db = 20.0 * np.log10(rms + 1e-9)
-    return np.convolve(db, np.ones(SMOOTH) / SMOOTH, mode="same"), hop_s
-
-
-def _even(t0: float, t1: float, n: int) -> list[tuple[float, float]]:
-    if n <= 0:
-        return []
-    step = max(0.02, (t1 - t0) / n)
-    out = []
-    for i in range(n):
-        s = t0 + i * step
-        e = s + step if i + 1 < n else t1
-        out.append((round(s, 3), round(max(e, s + 0.02), 3)))
-    return out
-
-
-def _dp_segment(energy: np.ndarray, n: int, min_frames: int) -> list[int]:
-    """Split a 1-D curve into n contiguous parts of minimal within-part variance.
-
-    Each Japanese mora carries one vowel nucleus, so minimal-variance cut points
-    land between vowel cores — which works on legato phrases where there is no
-    energy dip to detect as an onset.
-    """
-    T = len(energy)
-    if n <= 1 or T < n * min_frames:
-        return [0] + [int(round(T * i / n)) for i in range(1, n)] + [T]
-
-    c1 = np.concatenate([[0.0], np.cumsum(energy)])
-    c2 = np.concatenate([[0.0], np.cumsum(energy ** 2)])
-
-    def cost(i: int, j: int) -> float:
-        m = j - i
-        if m <= 0:
-            return 1e18
-        s1 = c1[j] - c1[i]
-        s2 = c2[j] - c2[i]
-        return float(s2 - s1 * s1 / m)
-
-    INF = 1e18
-    dp = np.full((n + 1, T + 1), INF)
-    prev = np.zeros((n + 1, T + 1), dtype=np.int32)
-    dp[0][0] = 0.0
-    for k in range(1, n + 1):
-        for j in range(k * min_frames, T + 1):
-            best, arg = INF, -1
-            for i in range((k - 1) * min_frames, j - min_frames + 1):
-                v = dp[k - 1][i]
-                if v >= INF:
-                    continue
-                v += cost(i, j)
-                if v < best:
-                    best, arg = v, i
-            dp[k][j] = best
-            prev[k][j] = arg
-
-    cuts = [T]
-    j = T
-    for k in range(n, 0, -1):
-        j = int(prev[k][j])
-        cuts.append(j)
-    cuts.reverse()
-    return cuts
-
-
-def _trim_silence(x, sr, t0: float, t1: float, rel_db: float = -22.0):
-    i0 = max(0, int(t0 * sr))
-    i1 = min(len(x), int(t1 * sr))
-    if i1 - i0 < sr // 25:
-        return t0, t1
-    db, hop_s = _db_curve(x[i0:i1], sr)
-    if len(db) < 3:
-        return t0, t1
-    peak = float(np.max(db))
-    if peak < -45.0:
-        return t0, t1
-    voiced = np.where(db > peak + rel_db)[0]
-    if len(voiced) == 0:
-        return t0, t1
-    a = i0 / sr + voiced[0] * hop_s
-    b = i0 / sr + (voiced[-1] + 1) * hop_s
-    if b - a < 0.12:
-        return t0, t1
-    return max(t0, a), min(t1, b)
-
-
-def _place_in_span(x, sr, t0: float, t1: float, n: int):
-    if n <= 0:
-        return []
-    if n == 1:
-        return [(round(t0, 3), round(t1, 3))]
-    t0, t1 = _trim_silence(x, sr, t0, t1)
-    i0, i1 = max(0, int(t0 * sr)), min(len(x), int(t1 * sr))
-    bounds_t = None
-    if i1 - i0 >= sr // 20 and (t1 - t0) / n >= 0.05:
-        db, hop_s = _db_curve(x[i0:i1], sr)
-        if len(db) >= n * 3:
-            cuts = _dp_segment(db, n, max(2, int(0.035 / hop_s)))
-            bounds_t = [t0 + c * hop_s for c in cuts]
-    if bounds_t is None:
-        bounds_t = list(np.linspace(t0, t1, n + 1))
-    out = []
-    for i in range(n):
-        a, b = bounds_t[i], bounds_t[i + 1]
-        if b - a < 0.02:
-            b = a + 0.02
-        out.append((round(a, 3), round(b, 3)))
-    return out
-
-
-def prune_outliers(spans, gap: float = 3.0):
-    """Keep only the densest cluster of spans.
-
-    Whisper sometimes emits one stray word far from the rest of a line (bleed
-    from the previous phrase). Stretching the line across that hole would leave
-    a mora lit for seconds, so the stray cluster is dropped.
-    """
-    if len(spans) <= 1:
-        return spans
-    spans = sorted(spans)
-    clusters = [[spans[0]]]
-    for a, b in spans[1:]:
-        if a - clusters[-1][-1][1] > gap:
-            clusters.append([(a, b)])
-        else:
-            clusters[-1].append((a, b))
-    if len(clusters) == 1:
-        return spans
-    return max(clusters, key=lambda c: sum(b - a for a, b in c))
-
-
-def place_morae_on_words(x, sr, word_spans, n_morae: int):
-    """Distribute n_morae over whisper word spans, proportional to their length."""
-    spans = [(float(a), float(b)) for a, b in word_spans if b - a > 0.02]
-    spans = prune_outliers(spans)
-    if not spans or n_morae <= 0:
-        return []
-    if len(spans) > n_morae:
-        spans = sorted(spans, key=lambda p: p[1] - p[0], reverse=True)[:n_morae]
-        spans.sort()
-
-    durs = np.array([b - a for a, b in spans], dtype=float)
-    total = durs.sum()
-    if n_morae >= len(spans):
-        counts = np.maximum(1, np.round(durs / total * n_morae).astype(int))
-        while counts.sum() > n_morae:
-            i = int(np.argmax(counts - durs / total * n_morae))
-            if counts[i] <= 1:
-                break
-            counts[i] -= 1
-        while counts.sum() < n_morae:
-            counts[int(np.argmax(durs / total * n_morae - counts))] += 1
-    else:
-        counts = np.ones(len(spans), dtype=int)
-
-    out = []
-    for (a, b), c in zip(spans, counts):
-        out.extend(_place_in_span(x, sr, a, b, int(c)))
-    return out[:n_morae]
-
-
-# --------------------------------------------------------------------------- #
 # whisper
 # --------------------------------------------------------------------------- #
 def _enable_cuda_dlls() -> None:
@@ -265,11 +109,11 @@ def _enable_cuda_dlls() -> None:
         pass
 
 
-def _transcribe(x: np.ndarray, progress) -> list[dict]:
-    """Transcribe a 16 kHz mono float32 array.
+def _run_whisper(progress, fn):
+    """Load the bundled model and run ``fn(model)``; returns (result, label).
 
-    Passing the array (rather than a path) keeps faster-whisper away from PyAV's
-    ``av.open(..., metadata_errors=...)``, which older PyAV builds reject.
+    Each (model, device) attempt runs the whole job, so a CUDA build that loads
+    but fails on the first decode (missing cuDNN) still falls back to the CPU.
     """
     _enable_cuda_dlls()
     from faster_whisper import WhisperModel
@@ -283,30 +127,85 @@ def _transcribe(x: np.ndarray, progress) -> list[dict]:
         try:
             progress(0.10, f"载入 whisper {_label(name)}（{device}）…")
             model = WhisperModel(str(name), device=device, compute_type=ctype)
-            progress(0.18, "识别歌声…")
-            # VAD off: Silero rejects sung/spoken-over-music audio and returns
-            # nothing, while raw decoding still finds the phrases.
-            segs, _info = model.transcribe(
-                x, language="ja", word_timestamps=True,
-                vad_filter=False, beam_size=5,
-                condition_on_previous_text=False,
-                # No initial_prompt: on sung audio whisper tends to emit the
-                # prompt itself as a lyric line, which then swallows the first
-                # half-minute of real anchors.
-            )
-            out = []
-            for s in segs:
-                words = [{"w": w.word, "s": round(w.start, 3), "e": round(w.end, 3)}
-                         for w in (s.words or []) if w.end > w.start]
-                out.append({"start": round(s.start, 3), "end": round(s.end, 3),
-                            "text": s.text.strip(), "words": words})
-            return out
+            return fn(model), _label(name)
         except Exception as e:  # noqa: BLE001
             last = e
             continue
     # a bundled model was found but failed to load — that is a broken pack or a
     # real decode fault, not a missing model
     raise RuntimeError(f"whisper 转写失败：{last}")
+
+
+def _decode(model, x: np.ndarray):
+    # VAD off: Silero rejects sung/spoken-over-music audio and returns nothing,
+    # while raw decoding still finds the phrases. No initial_prompt: on sung
+    # audio whisper tends to emit the prompt itself as a lyric line.
+    segs, _info = model.transcribe(
+        x, language="ja", word_timestamps=True, vad_filter=False, beam_size=5,
+        condition_on_previous_text=False)
+    return segs
+
+
+def _transcribe(x: np.ndarray, progress) -> list[dict]:
+    """Whole-track transcription as whisper segments (used by the retime fit).
+
+    Passing the array (rather than a path) keeps faster-whisper away from PyAV's
+    ``av.open(..., metadata_errors=...)``, which older PyAV builds reject.
+    """
+    def work(model):
+        progress(0.18, "识别歌声…")
+        out = []
+        for s in _decode(model, x):
+            words = [{"w": w.word, "s": round(w.start, 3), "e": round(w.end, 3)}
+                     for w in (s.words or []) if w.end > w.start]
+            out.append({"start": round(s.start, 3), "end": round(s.end, 3),
+                        "text": s.text.strip(), "words": words})
+        return out
+
+    return _run_whisper(progress, work)[0]
+
+
+def _chunk_starts(duration: float) -> list[float]:
+    """Window starts whose trusted middles tile the track exactly.
+
+    Stops at the first window that reaches the end, otherwise the last trusted
+    zones would overlap and the same words be counted twice.
+    """
+    hop = CHUNK_WIN - 2 * CHUNK_EDGE
+    starts, t = [0.0], 0.0
+    while t + CHUNK_WIN < duration:
+        t += hop
+        starts.append(t)
+    return starts
+
+
+def _transcribe_chunked(x: np.ndarray, sr: int, progress) -> tuple[list[dict], str]:
+    """Word list ``[{w, s, e}]`` from short overlapping windows."""
+    dur = len(x) / sr
+    starts = _chunk_starts(dur)
+
+    def work(model):
+        out = []
+        for k, a in enumerate(starts):
+            progress(0.18 + 0.38 * k / len(starts), f"识别歌声（{k + 1}/{len(starts)} 段）…")
+            b = min(dur, a + CHUNK_WIN)
+            lo = a + (CHUNK_EDGE if a > 0 else 0.0)
+            hi = b - (CHUNK_EDGE if b < dur else 0.0)
+            for s in _decode(model, x[int(a * sr):int(b * sr)]):
+                for w in (s.words or []):
+                    gs, ge = a + w.start, a + w.end
+                    if ge > gs and lo <= (gs + ge) / 2 < hi:
+                        out.append({"w": w.word, "s": round(gs, 3), "e": round(ge, 3)})
+        return out
+
+    words, label = _run_whisper(progress, work)
+    words.sort(key=lambda d: d["s"])
+    dedup: list[dict] = []
+    for w in words:
+        if dedup and w["w"] == dedup[-1]["w"] and w["s"] - dedup[-1]["s"] < 0.35:
+            continue
+        dedup.append(w)
+    return dedup, label
 
 
 # --------------------------------------------------------------------------- #
@@ -346,7 +245,8 @@ def _model_attempts() -> list[tuple[str | Path, str, str]]:
     """Ordered (model, device, compute_type) tries.
 
     Only bundled `models/<name>/` dirs are tried — the model is local by
-    contract, never pulled over the network.
+    contract, never pulled over the network. CUDA goes first when torch sees a
+    GPU, with the CPU kept as a fallback for a broken CUDA runtime.
     """
     local = _local_model_dirs()
     if not local:
@@ -358,13 +258,12 @@ def _model_attempts() -> list[tuple[str | Path, str, str]]:
             cuda_ok = True
     except Exception:  # noqa: BLE001
         pass
-    device = "cuda" if cuda_ok else "cpu"
-    ctype = "float16" if cuda_ok else "int8"
-    return [(n, device, ctype) for n in local]
+    cpu = [(n, "cpu", "int8") for n in local]
+    return [(n, "cuda", "float16") for n in local] + cpu if cuda_ok else cpu
 
 
 # --------------------------------------------------------------------------- #
-# alignment
+# text helpers (also used by the retime fit)
 # --------------------------------------------------------------------------- #
 def norm(s: str) -> str:
     s = unicodedata.normalize("NFKC", s)
@@ -426,86 +325,235 @@ def align(lines: list[str], wsegs: list[dict]) -> list[dict | None]:
     return out
 
 
-def _trim_uncovered_tail(lines: list[str], placed: list[dict | None]):
-    """Drop lyric lines that the audio simply does not reach.
+# --------------------------------------------------------------------------- #
+# kana alignment
+# --------------------------------------------------------------------------- #
+def _tok_kana(tok: dict) -> str:
+    return norm(tok.get("kana") or tok["surface"]).lower()
 
-    A user's file is often only part of the song (a TV-size cut, one verse),
-    while the lyric source describes the whole track. Those trailing lines have
-    no anchor at all; spreading them over the leftover seconds would invent
-    dozens of wrong lines. Keep them only while the tail is a plausible gap.
+
+_KANA_CACHE: dict[str, str] = {}
+
+
+def _text_kana(text: str) -> str:
+    """Reading of a transcript word: whisper writes kanji, the lyric may not."""
+    hit = _KANA_CACHE.get(text)
+    if hit is None:
+        toks = analyze(text) or []
+        hit = "".join(_tok_kana(t) for t in toks) if toks else norm(text).lower()
+        if len(_KANA_CACHE) > 20000:
+            _KANA_CACHE.clear()
+        _KANA_CACHE[text] = hit
+    return hit
+
+
+def _kana_match(line_kana: list[str], words: list[dict]) -> list[list[tuple | None]]:
+    """Needleman–Wunsch of every lyric kana against every transcript kana.
+
+    Returns, per line, one entry per kana: ``(word_index, offset, word_len)``
+    when it matched a transcript kana, else None. Transcript kana before the
+    first and after the last lyric kana are free (intro chatter, outro ad-libs).
+    So are lyric kana before the first and after the last transcript kana: a
+    clip of the song leaves whole lines unsung, and with a costed tail a
+    repeated chorus would tie and could pull the clip's last words onto the
+    song's final repeat instead of the lines it actually reaches.
     """
-    if not any(placed):
-        return lines, placed
-    last = max(i for i, p in enumerate(placed) if p is not None)
-    matched = sum(1 for p in placed if p is not None)
-    tail = len(lines) - last - 1
-    if tail > max(2, matched):
-        return lines[:last + 1], placed[:last + 1]
-    return lines, placed
+    L, lid, lpos = [], [], []
+    for i, k in enumerate(line_kana):
+        for p, c in enumerate(k):
+            L.append(c)
+            lid.append(i)
+            lpos.append(p)
+    T, wid, woff = [], [], []
+    wkana = [_text_kana(w["w"]) for w in words]
+    for k, wk in enumerate(wkana):
+        for o, c in enumerate(wk):
+            T.append(c)
+            wid.append(k)
+            woff.append(o)
+    res: list[list[tuple | None]] = [[None] * len(k) for k in line_kana]
+    n, m = len(L), len(T)
+    if not n or not m:
+        return res
+
+    width = m + 1
+    prev = [0.0] * width
+    back = bytearray((n + 1) * width)
+    for i in range(1, n + 1):
+        cur = [0.0] * width
+        back[i * width] = 1
+        li = L[i - 1]
+        row = i * width
+        tail_gap = KANA_GAP if i < n else 0.0
+        for j in range(1, width):
+            d = prev[j - 1] + (KANA_MATCH if li == T[j - 1] else KANA_MISMATCH)
+            u = prev[j] + (KANA_GAP if j < m else 0.0)
+            lft = cur[j - 1] + tail_gap
+            if d >= u and d >= lft:
+                cur[j] = d
+            elif u >= lft:
+                cur[j] = u
+                back[row + j] = 1
+            else:
+                cur[j] = lft
+                back[row + j] = 2
+        prev = cur
+
+    i, j = n, m
+    while i > 0 and j > 0:
+        b = back[i * width + j]
+        if b == 0:
+            if L[i - 1] == T[j - 1]:
+                k = wid[j - 1]
+                res[lid[i - 1]][lpos[i - 1]] = (k, woff[j - 1], len(wkana[k]))
+            i, j = i - 1, j - 1
+        elif b == 1:
+            i -= 1
+        else:
+            j -= 1
+    return res
 
 
-def _fill_gaps(placed: list[dict | None], lines: list[str], audio_end: float) -> None:
-    n = len(placed)
-    idx = 0
-    while idx < n:
-        if placed[idx] is not None:
-            idx += 1
+def _anchor_rows(res: list[list[tuple | None]], words: list[dict]):
+    """Per line: (kana times with None gaps, matched indices, coverage) or None.
+
+    A line needs a fair share of its kana matched to count as found; a couple
+    of stray hits are as likely to be a neighbouring line's words.
+    """
+    rows = []
+    for mt in res:
+        n = len(mt)
+        hits = [p for p in range(n) if mt[p]]
+        if len(hits) < max(2, MIN_COVERAGE * n):
+            rows.append(None)
             continue
-        run_start = idx
-        while idx < n and placed[idx] is None:
-            idx += 1
-        run_end = idx
+        first_word = mt[hits[0]][0]
+        t: list[float | None] = [None] * n
+        last = -1.0
+        for p in hits:
+            k, off, wl = mt[p]
+            s, e = words[k]["s"], words[k]["e"]
+            # whisper stretches a line's first word back over the breath or the
+            # instrumental before it; a sung kana rarely lasts longer than this
+            if k == first_word and (e - s) / wl > FIRST_WORD_CAP:
+                s = e - FIRST_WORD_CAP * wl
+            v = s + (e - s) * off / wl
+            if v > last:
+                t[p] = v
+                last = v
+        hits = [p for p in range(n) if t[p] is not None]
+        # A few kana of a line can meet the same kana many seconds away (a
+        # chorus repeat, an ad-lib) and would stretch the line across that
+        # hole; keep only the densest run of anchors.
+        runs = [[hits[0]]]
+        for q in hits[1:]:
+            if t[q] - t[runs[-1][-1]] > ANCHOR_GAP:
+                runs.append([q])
+            else:
+                runs[-1].append(q)
+        if len(runs) > 1:
+            keep = max(runs, key=len)
+            for q in hits:
+                if q not in keep:
+                    t[q] = None
+            hits = keep
+            if len(hits) < max(2, MIN_COVERAGE * n):
+                rows.append(None)
+                continue
+        rows.append((t, hits, len(hits) / max(1, n)))
+    return rows
 
-        prev_end = 0.0
-        for k in range(run_start - 1, -1, -1):
-            if placed[k] is not None:
-                prev_end = placed[k]["end"]
-                break
-        next_start = audio_end
-        for k in range(run_end, n):
-            if placed[k] is not None:
-                next_start = placed[k]["start"]
-                break
 
-        gap = max(0.4, next_start - prev_end)
-        counts = [max(1, len(norm(lines[k]))) for k in range(run_start, run_end)]
-        total = sum(counts) or 1
-        t = prev_end
-        for k, cnt in zip(range(run_start, run_end), counts):
-            span = gap * cnt / total
-            placed[k] = {"start": round(t, 3), "end": round(t + span, 3),
-                         "text": "", "words": []}
-            t += span
+def _line_times(line_kana: list[str], rows, audio_end: float,
+                clip_tail: bool = False):
+    """Fill every line's kana times; returns [(times, start, end, coverage)]."""
+    count = len(line_kana)
+    out: list[tuple | None] = [None] * count
+    for li in range(count):
+        row = rows[li]
+        if row is None:
+            continue
+        t, hits, cov = row
+        n = len(t)
+        prev_end = next((rows[k][0][rows[k][1][-1]] for k in range(li - 1, -1, -1)
+                         if rows[k]), 0.0)
+        next_start = next((rows[k][0][rows[k][1][0]] for k in range(li + 1, count)
+                           if rows[k]), audio_end)
+        a, b = hits[0], hits[-1]
+        r = (t[b] - t[a]) / (b - a) if b > a else DEFAULT_RATE
+        r = min(MAX_RATE, max(MIN_RATE, r))
+        for p in range(a):
+            t[p] = max(prev_end + 0.05 * (p + 1), t[a] - (a - p) * r)
+        for x, y in zip(hits, hits[1:]):
+            for p in range(x + 1, y):
+                t[p] = t[x] + (t[y] - t[x]) * (p - x) / (y - x)
+        for p in range(b + 1, n):
+            t[p] = min(next_start - 0.05 * (n - p), t[b] + (p - b) * r)
+        for p in range(1, n):
+            t[p] = max(t[p], t[p - 1])
+        end = max(t[-1], min(next_start, t[-1] + r))
+        out[li] = (t, t[0], end, cov)
+
+    li = 0
+    while li < count:
+        if out[li] is not None:
+            li += 1
+            continue
+        j = li
+        while j < count and out[j] is None:
+            j += 1
+        sizes = [len(line_kana[k]) or 1 for k in range(li, j)]
+        tot = sum(sizes)
+        t0 = out[li - 1][2] if li > 0 else None
+        t1 = out[j][1] if j < count else None
+        # an unmatched head or tail run has only one neighbour: sing it at a
+        # plausible pace next to that neighbour instead of smearing it across
+        # the whole intro / outro
+        if t0 is None:
+            t1 = t1 if t1 is not None else audio_end
+            t0 = max(0.0, t1 - FIRST_WORD_CAP * tot)
+        elif t1 is None:
+            # A clip that started mid-song is almost certainly cut off at the
+            # end too; run the unmatched tail past the file at a natural pace
+            # rather than crushing it into the last seconds.
+            t1 = t0 + FIRST_WORD_CAP * tot if clip_tail else min(
+                max(audio_end, t0), t0 + FIRST_WORD_CAP * tot)
+        cur = t0
+        for k, nk in zip(range(li, j), sizes):
+            span = max(0.0, t1 - t0) * nk / tot
+            out[k] = ([cur + span * q / nk for q in range(nk)], cur, cur + span, 0.0)
+            cur += span
+        li = j
+    return out
 
 
 # --------------------------------------------------------------------------- #
 # build
 # --------------------------------------------------------------------------- #
-def _assign_times(text: str, tokens: list[dict], spans) -> list:
-    """Map mora spans onto character indices of the line."""
-    times: list[tuple[float, float] | None] = [None] * len(text)
-    k = 0
-    cursor = spans[0][0] if spans else 0.0
-    for t in tokens:
-        n = mora_count(t)
-        if n <= 0:  # punctuation: a sliver of time at the cursor
-            for i in range(t["start"], min(t["end"], len(text))):
-                times[i] = (round(cursor, 3), round(cursor + 0.05, 3))
-            continue
-        take = spans[k:k + n]
-        k += n
-        if not take:
-            continue
-        a, b = take[0][0], take[-1][1]
-        cursor = b
-        m = max(1, t["end"] - t["start"])
-        step = (b - a) / m
-        for j in range(m):
-            idx = t["start"] + j
-            if idx < len(text):
-                times[idx] = (round(a + j * step, 3), round(a + (j + 1) * step, 3))
+def _assign_times(text: str, tokens: list[dict], kls: list[int],
+                  t: list[float], end: float) -> list:
+    """Map the line's kana times onto character indices of `text`.
 
-    prev = spans[0][0] if spans else 0.0
+    A token owns the time from its first kana to the next token's first kana,
+    shared evenly over its characters (kanji carry several kana each).
+    """
+    times: list[tuple[float, float] | None] = [None] * len(text)
+    n = len(t)
+    p = 0
+    for tok, kl in zip(tokens, kls):
+        a = t[p] if p < n else end
+        if kl == 0:
+            b = min(a + 0.05, max(a, end))
+        else:
+            b = t[p + kl] if p + kl < n else end
+        b = max(a, b)
+        rng = range(tok["start"], min(tok["end"], len(text)))
+        step = (b - a) / max(1, len(rng))
+        for q, i in enumerate(rng):
+            times[i] = (round(a + q * step, 3), round(a + (q + 1) * step, 3))
+        p += kl
+
+    prev = t[0] if t else 0.0
     for i, tv in enumerate(times):
         if tv is None:
             times[i] = (round(prev, 3), round(prev, 3))
@@ -514,132 +562,169 @@ def _assign_times(text: str, tokens: list[dict], spans) -> list:
     return times
 
 
+def _prepare(raw: str):
+    """Tokenise one lyric line; returns (text, tokens, kana lengths) or None.
+
+    `[汉字](よみ)` marks are markup, never sung: they are stripped before the
+    tagger, and the marked reading replaces the token's kana *before* the
+    alignment, so a custom reading also steers which transcript kana it meets.
+    """
+    text, marks = parse_reading_marks(raw)
+    tokens = analyze(text)
+    if not tokens:
+        return None
+    apply_reading_marks(text, tokens, marks)
+    _prefer_kana_lemma(tokens)
+    return text, tokens, [len(_tok_kana(t)) for t in tokens]
+
+
+def _locate(prepared: list, words: list[dict]):
+    kana = ["".join(_tok_kana(t) for t in tokens) for _, tokens, _ in prepared]
+    return kana, _anchor_rows(_kana_match(kana, words), words)
+
+
 def build_from_audio(audio: str | Path, lines: list[str], meta: dict,
-                     progress=None, wsegs: list[dict] | None = None) -> dict:
+                     progress=None, words: list[dict] | None = None) -> dict:
     """Estimate timing for `lines` from `audio`; returns a song_data dict.
 
-    ``wsegs`` accepts an existing transcription. The retime path transcribes the
-    audio first and falls back here when the fit is unreliable; passing that
-    result in avoids paying for a second whisper pass over the whole song.
+    ``words`` accepts an existing chunked transcription (``[{w, s, e}]``),
+    skipping the whisper pass.
     """
     p = progress or (lambda frac, msg: None)
     lines = [ln.strip() for ln in lines if ln.strip()]
-    if not lines:
+    prepared = [x for x in (_prepare(ln) for ln in lines) if x]
+    if not prepared:
         raise ValueError("歌词为空")
 
     p(0.04, "解码音频…")
     wav = to_wav(audio)
     try:
         x, sr = load_wav(wav)
-        p(0.08, f"音频 {len(x) / sr:.1f}s")
-        if wsegs is None:
-            wsegs = _transcribe(x, p)
-        if not wsegs:
-            raise RuntimeError("没有识别到任何歌声，请检查音频或歌词")
-
-        p(0.58, f"对齐 {len(lines)} 行歌词…")
-        # Two passes: the first locates how far the audio actually reaches, so a
-        # lyric source describing the full track cannot drag the DP alignment
-        # of the lines that *are* covered.
-        placed = align(lines, wsegs)
-        kept_lines, _ = _trim_uncovered_tail(lines, placed)
-        if len(kept_lines) < len(lines):
-            p(0.60, f"音频只覆盖前 {len(kept_lines)} 行，重新对齐…")
-            lines = kept_lines
-            placed = align(lines, wsegs)
-
-        # Use the real audio length, not the last whisper segment: when whisper
-        # gives up on the outro, the remaining lines still need somewhere to go
-        # instead of being crammed at the last anchor.
         audio_end = len(x) / sr
-        _fill_gaps(placed, lines, audio_end)
-
-        p(0.68, "按人声能量定位每个音…")
-        segments = []
-        for li, seg in enumerate(placed):
-            text = lines[li]
-            tokens = analyze(text)
-            if not tokens:
-                continue
-            _prefer_kana_lemma(tokens)
-            total = sum(mora_count(t) for t in tokens)
-            anchors = [(w["s"], w["e"]) for w in seg.get("words", [])
-                       if w["e"] - w["s"] > 0.02]
-            spans = place_morae_on_words(x, sr, anchors, total) if total else []
-            if not spans:
-                spans = _even(seg["start"], seg["end"], max(1, total))
-            times = _assign_times(text, tokens, spans)
-            enrich(tokens)
-            # Grammar first: a word that sits inside a detected pattern is
-            # grammar material, not vocabulary. わけ in わけにはいかない must not
-            # surface as "原因；理由". This has to happen here because only the
-            # tokens still know their character offsets -- the stored word
-            # start/end are seconds, so the UI cannot work this out.
-            grammar = find_grammar(text, tokens)
-            gspans = [(g["at"], g["at"] + len(g["matched"])) for g in grammar]
-
-            def _in_grammar(tok: dict) -> bool:
-                return any(tok["start"] < b and a < tok["end"] for a, b in gspans)
-
-            words = []
-            for t in tokens:
-                rng = range(t["start"], min(t["end"], len(text)))
-                seg_chars = [{"ch": text[i], "start": times[i][0], "end": times[i][1]}
-                             for i in rng if times[i]]
-                if not seg_chars:
-                    continue
-                w = {
-                    "text": t["surface"], "lemma": t["lemma"],
-                    "pos": t["pos"], "pos1": t["pos1"],
-                    "start": seg_chars[0]["start"], "end": seg_chars[-1]["end"],
-                    "score": round(0.55 + 0.35 * lcs_ratio(norm(text), norm(seg.get("text", ""))), 3),
-                    "chars": seg_chars,
-                    "content": is_content(t) and not _in_grammar(t),
-                }
-                if t.get("kana"):
-                    w["kana"] = t["kana"]
-                w["romaji"] = "" if all(c in " \u3000、。,.!?！？…「」『』()（）・~〜-—" for c in t["surface"]) else t["romaji"]
-                if t.get("zh"):
-                    w["zh"] = t["zh"]
-                if t.get("jlpt"):
-                    w["jlpt"] = t["jlpt"]
-                if t.get("lemma_kana"):
-                    w["lemma_kana"] = t["lemma_kana"]
-                words.append(w)
-            if not words:
-                continue
-
-            entry = {
-                "id": len(segments),
-                "start": round(words[0]["start"], 3),
-                "end": round(words[-1]["end"], 3),
-                "text": text,
-                "romaji": " ".join(w["romaji"] for w in words if w["romaji"]),
-                "words": words,
-            }
-            if grammar:
-                entry["grammar"] = grammar
-            segments.append(entry)
-
-        if not segments:
-            raise RuntimeError("歌词与音频没有对齐出任何一行")
-
-        duration = probe_duration(audio) or round(segments[-1]["end"], 2)
-        p(0.96, f"完成 {len(segments)} 行")
-        return {
-            "meta": {
-                "language": "ja",
-                "duration_seconds": round(duration, 2),
-                "generated_at": meta.pop("generated_at", None) or _now(),
-                **meta,
-            },
-            "segments": segments,
-        }
+        p(0.08, f"音频 {audio_end:.1f}s")
+        if words is None:
+            words, label = _transcribe_chunked(x, sr, p)
+            meta["whisperx_model"] = label
     finally:
         try:
             wav.unlink(missing_ok=True)
         except Exception:  # noqa: BLE001
             pass
+    if not words:
+        raise RuntimeError("没有识别到任何歌声，请检查音频或歌词")
+
+    p(0.58, f"按假名对齐 {len(prepared)} 行歌词…")
+    kana, rows = _locate(prepared, words)
+    found = [i for i, r in enumerate(rows) if r]
+    if not found:
+        raise RuntimeError("歌词与音频对不上：没有一行能在歌声里找到，请确认歌词和音频是同一首歌")
+    # A user's file is often only part of the song (a TV-size cut, one verse)
+    # while the pasted lyrics describe the whole track. Leading / trailing
+    # lines with no anchor at all would otherwise be invented across the
+    # leftover seconds; a short unmatched run is kept as an ordinary miss.
+    lo, hi = 0, len(prepared)
+    # More than a couple of leading lines unmatched means the clip starts
+    # mid-song; a stray missed line or two is kept as an ordinary miss.
+    if found[0] > 2:
+        lo = found[0]
+    if len(prepared) - found[-1] - 1 > max(2, len(found)):
+        hi = found[-1] + 1
+    if (lo, hi) != (0, len(prepared)):
+        p(0.60, f"音频只覆盖第 {lo + 1}–{hi} 行，重新对齐…")
+        prepared = prepared[lo:hi]
+        kana, rows = _locate(prepared, words)
+
+    p(0.68, "逐字定位…")
+    # The effective end of sung content is the last transcript word, not the
+    # file's total duration: an instrumental tail would otherwise pull the
+    # unmatched lines into silence that still counts as "before the end".
+    song_end = words[-1]["e"] if words else audio_end
+    timed = _line_times(kana, rows, song_end, clip_tail=lo > 0)
+
+    segments = []
+    for (text, tokens, kls), (t, _start, end, cov) in zip(prepared, timed):
+        times = _assign_times(text, tokens, kls, t, end)
+        enrich(tokens)
+        # Grammar first: a word that sits inside a detected pattern is grammar
+        # material, not vocabulary. わけ in わけにはいかない must not surface as
+        # "原因；理由". This has to happen here because only the tokens still
+        # know their character offsets -- the stored word start/end are
+        # seconds, so the UI cannot work this out.
+        grammar = find_grammar(text, tokens)
+        gspans = [(g["at"], g["at"] + len(g["matched"])) for g in grammar]
+
+        def _in_grammar(tok: dict) -> bool:
+            return any(tok["start"] < b and a < tok["end"] for a, b in gspans)
+
+        out_words = []
+        for tk in tokens:
+            rng = range(tk["start"], min(tk["end"], len(text)))
+            seg_chars = [{"ch": text[i], "start": times[i][0], "end": times[i][1]}
+                         for i in rng if times[i]]
+            if not seg_chars:
+                continue
+            w = {
+                "text": tk["surface"], "lemma": tk["lemma"],
+                "pos": tk["pos"], "pos1": tk["pos1"],
+                "start": seg_chars[0]["start"], "end": seg_chars[-1]["end"],
+                "score": round(0.55 + 0.35 * cov, 3),
+                "chars": seg_chars,
+                "content": is_content(tk) and not _in_grammar(tk),
+            }
+            if tk.get("kana"):
+                w["kana"] = tk["kana"]
+            w["romaji"] = "" if all(c in " \u3000、。,.!?！？…「」『』()（）・~〜-—" for c in tk["surface"]) else tk["romaji"]
+            if tk.get("zh"):
+                w["zh"] = tk["zh"]
+            if tk.get("jlpt"):
+                w["jlpt"] = tk["jlpt"]
+            if tk.get("lemma_kana"):
+                w["lemma_kana"] = tk["lemma_kana"]
+            out_words.append(w)
+        if not out_words:
+            continue
+
+        entry = {
+            "id": len(segments),
+            "start": round(out_words[0]["start"], 3),
+            "end": round(max(out_words[-1]["end"], end), 3),
+            "text": text,
+            "romaji": " ".join(w["romaji"] for w in out_words if w["romaji"]),
+            "words": out_words,
+        }
+        if grammar:
+            entry["grammar"] = grammar
+        segments.append(entry)
+
+    if not segments:
+        raise RuntimeError("歌词与音频没有对齐出任何一行")
+
+    # A line's extrapolated head may reach back past where the previous line's
+    # tail was extrapolated to; end the earlier line there so two lines never
+    # claim the same instant.
+    for cur, nxt in zip(segments, segments[1:]):
+        cut = nxt["start"]
+        if cur["end"] <= cut:
+            continue
+        cur["end"] = max(cur["start"], cut)
+        for w in cur["words"]:
+            for c in w["chars"]:
+                c["start"] = min(c["start"], cur["end"])
+                c["end"] = min(c["end"], cur["end"])
+            w["start"] = w["chars"][0]["start"]
+            w["end"] = w["chars"][-1]["end"]
+
+    duration = probe_duration(audio) or round(segments[-1]["end"], 2)
+    p(0.96, f"完成 {len(segments)} 行")
+    return {
+        "meta": {
+            "language": "ja",
+            "duration_seconds": round(duration, 2),
+            "generated_at": meta.pop("generated_at", None) or _now(),
+            **meta,
+        },
+        "segments": segments,
+    }
 
 
 def _now() -> str:

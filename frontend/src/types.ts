@@ -88,6 +88,9 @@ export interface SongMeta {
   source_kind?: string;
   /** whether audio.mp3 actually exists for this dataset */
   has_audio?: boolean;
+  /** seconds the lyric timeline is shifted against the audio; positive plays
+   *  the highlight later, negative earlier (-2 … 2, one decimal) */
+  time_offset?: number;
 }
 
 export interface SongData {

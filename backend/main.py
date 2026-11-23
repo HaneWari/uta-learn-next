@@ -440,12 +440,11 @@ async def api_build(payload: dict):
                     "title": title, "artist": artist,
                     "youtube_url": "", "language": "ja",
                     "whisperx_model": os.environ.get("UTALEARN_WHISPER", "large-v3"),
-                    "align_model": f"{label} 歌词 + whisper 词锚点 / 人声能量",
+                    "align_model": f"{label} 歌词 + whisper 切片转写 / 假名全局对齐",
                     "vocal_separation": "none",
                     "source": f"{label}（歌词）+ 本机音频（时间轴）",
                     "source_kind": "estimated",
-                }, progress=progress,
-                    wsegs=getattr(parsed, "_wsegs", None))
+                }, progress=progress)
                 _attach_translation(data, parsed.translation)
         else:
             if audio is not None:
@@ -497,7 +496,7 @@ async def api_build_text(payload: dict):
             "title": title, "artist": artist,
             "youtube_url": "", "language": "ja",
             "whisperx_model": os.environ.get("UTALEARN_WHISPER", "large-v3"),
-            "align_model": "whisper 词锚点 + 人声能量分段",
+            "align_model": "whisper 切片转写 + 假名全局对齐 + 逐字锚定",
             "vocal_separation": "none",
             "source": "本地上传 + whisper",
             "source_kind": "estimated",
@@ -652,6 +651,13 @@ _WRITABLE_KEYS = {
     "hidden",
 }
 
+# Song-wide settings that sit in `meta` rather than on a segment. The offset
+# shifts the whole lyric timeline against the audio (positive = lyrics later);
+# it lives in the dataset so the export recorder, which reloads song_data.json,
+# plays with the same correction the user tuned by ear.
+_META_KEYS = {"time_offset"}
+TIME_OFFSET_MAX = 2.0
+
 
 @app.patch("/api/songs/{name}")
 def api_patch_song(name: str, patch: dict):
@@ -660,7 +666,12 @@ def api_patch_song(name: str, patch: dict):
     The payload is a partial `Segment` — only `vocab_override` and
     `grammar_extra` are writable through this route; everything else (text,
     timings, grammar) is derived data and stays authoritative.
+
+    A payload without `id` carrying only song-wide keys (`time_offset`) updates
+    `meta` instead.
     """
+    if "id" not in patch and patch and set(patch.keys()) <= _META_KEYS:
+        return _patch_meta(name, patch)
     bad = set(patch.keys()) - _WRITABLE_KEYS
     if bad:
         raise HTTPException(status_code=400, detail=f"只读字段: {sorted(bad)}")
@@ -705,6 +716,28 @@ def api_patch_song(name: str, patch: dict):
         return seg
 
     raise HTTPException(status_code=404, detail="segment not found")
+
+
+def _patch_meta(name: str, patch: dict) -> dict:
+    path = dataset(name) / "song_data.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="song_data.json missing")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    meta = data.setdefault("meta", {})
+    if "time_offset" in patch:
+        raw = patch["time_offset"]
+        try:
+            value = round(float(raw if raw is not None else 0.0), 1)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="时间偏移必须是数字") from None
+        if not -TIME_OFFSET_MAX <= value <= TIME_OFFSET_MAX:
+            raise HTTPException(status_code=400, detail="时间偏移须在 -2 到 2 秒之间")
+        if value == 0:
+            meta.pop("time_offset", None)
+        else:
+            meta["time_offset"] = value
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"time_offset": meta.get("time_offset", 0.0)}
 
 
 def _reline_grammar(text: str) -> list[dict] | None:

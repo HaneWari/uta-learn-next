@@ -1060,6 +1060,17 @@ body {
   border-radius: 4px;
 }
 
+.model-manual a {
+  color: var(--coral);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 138, 61, 0.4);
+}
+
+.model-manual a:hover {
+  border-bottom-color: var(--coral);
+}
+
 .model-progress {
   display: flex;
   align-items: center;
@@ -2314,9 +2325,9 @@ body {
 
 /* ---------- export button lives in the tab bar, right end ---------- */
 
-/* Both nav buttons carry .exportbtn. Only the leftmost of the pair may take the
-   auto margin, otherwise the free space is split between them and 设置背景
-   floats in the middle of the bar instead of sitting next to 导出视频. */
+/* All nav buttons carry .exportbtn. Only the leftmost (时间偏移) may take the
+   auto margin, otherwise the free space is split between them and the buttons
+   float in the middle of the bar instead of sitting together at the right. */
 .tabbar .bgbtn {
   margin-left: auto;
   flex: 0 0 auto;
@@ -2855,4 +2866,117 @@ body {
 .bgfoot-note {
   font-size: 12.5px;
   color: rgba(120, 98, 76, 0.85);
+}
+
+/* ---------- time offset dialog ---------- */
+
+/* A wide strip docked over the vocab row with a light mask: the offset is
+   tuned by watching the wipe against the voice, so the current and next lyric
+   lines above must stay fully visible; the cards are not needed meanwhile. */
+.bgmask.offsetmask {
+  place-items: end center;
+  padding: 24px 24px 96px;
+  background: rgba(28, 20, 14, 0.1);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.bgmodal.offsetmodal {
+  width: min(1080px, 100%);
+  padding: 14px 20px 16px;
+}
+
+.offsetmodal .bghead {
+  margin-bottom: 4px;
+}
+
+.offsetmodal .bghead h2 {
+  font-size: 17px;
+}
+
+.offsetmodal .bghint {
+  margin-bottom: 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.offsetmodal .bghint b {
+  color: var(--coral-deep);
+  font-weight: 600;
+}
+
+.offset-body {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+}
+
+.offset-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.offset-field {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+  color: rgba(90, 72, 55, 0.92);
+}
+
+.offset-field input {
+  width: 84px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(178, 146, 116, 0.5);
+  background: rgba(255, 255, 255, 0.9);
+  font-family: var(--sans);
+  font-size: 20px;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: #2f251b;
+  outline: none;
+}
+
+.offset-field input:focus {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.16);
+}
+
+.offset-track {
+  flex: 1 1 260px;
+  min-width: 220px;
+}
+
+.offset-slider {
+  width: 100%;
+  margin: 0 0 2px;
+  accent-color: var(--coral);
+}
+
+.offset-scale {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11.5px;
+  color: rgba(120, 98, 76, 0.85);
+}
+
+.offset-state {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #4a3a2b;
+}
+
+.offset-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.offsetmodal .hint-warn {
+  margin: 10px 0 0;
 }

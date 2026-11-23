@@ -10,6 +10,8 @@ interface LyricsDisplayProps {
   audioRef: RefObject<HTMLAudioElement | null>;
   /** timeline position when the dataset has no audio element */
   clockRef: RefObject<number>;
+  /** song-wide lyric delay against the audio, in seconds */
+  offset?: number;
   /** stage edits: save a corrected line or hide it (disabled in render mode) */
   onPatch?: (segId: number, body: Partial<Segment>) => Segment | undefined;
 }
@@ -29,6 +31,14 @@ function shownText(seg: Segment): string {
 
 function shownZh(seg: Segment): string | undefined {
   return seg.lyric_override?.translation_zh ?? seg.translation_zh;
+}
+
+/** The romaji under an upcoming/edited line: rebuilt override words win, so a
+    custom reading the user typed shows up in next too. */
+function shownRomaji(seg: Segment): string {
+  const ov = seg.lyric_override?.words;
+  if (ov?.length) return ov.map((w) => w.romaji).filter(Boolean).join(" ");
+  return seg.romaji;
 }
 
 /**
@@ -132,9 +142,14 @@ function WordView({ word, segmentId, wordIndex, syncState, activeRef }: WordView
 
 /** The upcoming line: same ruby treatment, no timing state. */
 function NextLine({ segment }: { segment: Segment }) {
+  // an edited line previews its *override* words, not the stale source tokens —
+  // otherwise the upcoming lyric still shows the text the user just corrected
+  const words = segment.lyric_override?.words?.length
+    ? segment.lyric_override.words
+    : segment.words;
   return (
     <span className="next-line">
-      {segment.words.map((w, i) => (
+      {words.map((w, i) => (
         <span className="wordbox" key={i}>
           <RubySurface word={w} renderChar={(ch, ci) => (
             <span className="ch" key={ci}>{ch}</span>
@@ -145,7 +160,7 @@ function NextLine({ segment }: { segment: Segment }) {
   );
 }
 
-export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch }: LyricsDisplayProps) {
+export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch }: LyricsDisplayProps) {
   const activeRef = useRef<HTMLSpanElement | null>(null);
   const cur = segments[syncState.displayIndex];
   const next = segments[syncState.displayIndex + 1] ?? null;
@@ -231,14 +246,14 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
     const span = Math.max(0.001, ch.end - ch.start);
     const loop = () => {
       // no audio element (lyrics-only dataset): follow the synthetic clock
-      const now = audio ? audio.currentTime : clockRef.current ?? 0;
+      const now = audio ? audio.currentTime - offset : clockRef.current ?? 0;
       const p = Math.min(1, Math.max(0, (now - ch.start) / span));
       el.style.setProperty("--p", p.toFixed(3));
       raf = requestAnimationFrame(loop);
     };
     loop();
     return () => cancelAnimationFrame(raf);
-  }, [cur, syncState.activeSegmentId, syncState.activeWordIndex, syncState.activeKanaIndex, audioRef, clockRef]);
+  }, [cur, syncState.activeSegmentId, syncState.activeWordIndex, syncState.activeKanaIndex, audioRef, clockRef, offset]);
 
   if (!cur) return null;
 
@@ -253,7 +268,7 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
             ) : (
               <span className="next-line">{shownText(next)}</span>
             )}
-            <span className="next-romaji">{next.romaji}</span>
+            <span className="next-romaji">{shownRomaji(next)}</span>
           </div>
         ) : (
           <div className="next-body" />

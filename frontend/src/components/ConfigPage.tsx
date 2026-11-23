@@ -432,7 +432,15 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                       <details className="model-manual">
                         <summary>手动安装</summary>
                         <p>
-                          到发行版页面下载 <code>UtaLearnNext-whisper-small.zip</code>，
+                          到
+                          <a
+                            href="https://github.com/HaneWari/uta-learn-next/releases/latest"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            发行版页面
+                          </a>
+                          下载 <code>UtaLearnNext-whisper-small.zip</code>，
                           解压到应用目录得到 <code>models/whisper-small/model.bin</code>，
                           重启程序即可。
                         </p>

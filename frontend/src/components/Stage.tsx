@@ -121,6 +121,7 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
           syncState={syncState}
           audioRef={audioRef}
           clockRef={clockRef}
+          offset={songData.meta.time_offset ?? 0}
           onPatch={render ? undefined : onPatchSegment}
         />
         {/* the export recorder must never carry the collapsed bar, so the

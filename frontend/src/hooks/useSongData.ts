@@ -80,5 +80,17 @@ export function useSongData(song: string | null) {
     [song],
   );
 
-  return { songData, error, loading, patch };
+  /** Apply a time offset to the stage at once; `persist` also saves it. */
+  const setTimeOffset = useCallback(
+    (value: number, persist: boolean): Promise<void> => {
+      setSongData((prev) =>
+        prev ? { ...prev, meta: { ...prev.meta, time_offset: value } } : prev,
+      );
+      if (!persist || !song) return Promise.resolve();
+      return api.setTimeOffset(song, value).then(() => undefined);
+    },
+    [song],
+  );
+
+  return { songData, error, loading, patch, setTimeOffset };
 }

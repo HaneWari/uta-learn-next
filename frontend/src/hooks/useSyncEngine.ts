@@ -103,6 +103,10 @@ export function useSyncEngine(
     if (!flatKana.length || !songData) return;
     const segments = songData.segments;
     const totalDur = songData.meta.duration_seconds || segments[segments.length - 1]?.end || 0;
+    // The user's per-song correction: the lyric timeline runs `offset` seconds
+    // behind the audio (negative = ahead). Only meaningful against a real
+    // playhead, so the synthetic clock ignores it.
+    const offset = songData.meta.time_offset ?? 0;
     const virt = { t: 0, last: performance.now() };
 
     function tick() {
@@ -110,10 +114,11 @@ export function useSyncEngine(
       const real = audio && isFinite(audio.duration) && audio.duration > 0;
 
       if (real) {
-        const time = audio.currentTime;
+        const time = audio.currentTime - offset;
         clockRef.current = time;
         // Recompute whenever the playhead moved — playback, seeking or
-        // scrubbing while paused. Skip the work when nothing changed.
+        // scrubbing while paused, or a new offset. Skip the work when
+        // nothing changed.
         if (time !== lastTimeRef.current) {
           lastTimeRef.current = time;
           sync(time, audio.duration || 0);

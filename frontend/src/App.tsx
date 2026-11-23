@@ -3,6 +3,7 @@ import { api, waitForJob } from "./api";
 import { useSongData } from "./hooks/useSongData";
 import { BackgroundModal } from "./components/BackgroundModal";
 import { ConfigPage } from "./components/ConfigPage";
+import { OffsetModal } from "./components/OffsetModal";
 import { Stage } from "./components/Stage";
 import type { SongSummary, StageBackground } from "./types";
 import "./App.css";
@@ -24,7 +25,14 @@ export default function App() {
   const [exportNote, setExportNote] = useState<string | null>(null);
   const [background, setBackground] = useState<StageBackground>(DEFAULT_BG);
   const [bgOpen, setBgOpen] = useState(false);
-  const { songData, error, loading, patch: patchSegment } = useSongData(song);
+  const [offsetOpen, setOffsetOpen] = useState(false);
+  const {
+    songData,
+    error,
+    loading,
+    patch: patchSegment,
+    setTimeOffset,
+  } = useSongData(song);
 
   const refresh = useCallback(() => {
     api.songs().then(setSongs).catch(() => setSongs([]));
@@ -142,6 +150,7 @@ export default function App() {
   }, [recovered]);
 
   const current = songs.find((s) => s.name === song);
+  const timeOffset = songData?.meta.time_offset ?? 0;
 
   return (
     <div className="shell">
@@ -169,6 +178,21 @@ export default function App() {
 
         <button
           className="exportbtn bgbtn"
+          onClick={() => {
+            // tuning is done by ear against the stage, so bring it up
+            setTab("stage");
+            setOffsetOpen(true);
+          }}
+          disabled={!songData}
+          title="调整当前这首的高亮、切句与歌声之间的时间差"
+        >
+          {timeOffset
+            ? `时间偏移 ${timeOffset > 0 ? "+" : ""}${timeOffset.toFixed(1)}s`
+            : "时间偏移"}
+        </button>
+
+        <button
+          className="exportbtn bgbtn"
           onClick={() => setBgOpen(true)}
           title="更换展示页的背景图"
         >
@@ -190,6 +214,16 @@ export default function App() {
           current={background}
           onClose={() => setBgOpen(false)}
           onApplied={setBackground}
+        />
+      )}
+
+      {offsetOpen && songData && (
+        <OffsetModal
+          current={timeOffset}
+          songTitle={songData.meta.title || song || ""}
+          onPreview={(v) => void setTimeOffset(v, false)}
+          onSave={(v) => setTimeOffset(v, true)}
+          onClose={() => setOffsetOpen(false)}
         />
       )}
 

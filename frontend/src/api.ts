@@ -109,6 +109,14 @@ export const api = {
       body: JSON.stringify(patch),
     }).then((r) => json<Record<string, unknown>>(r)),
 
+  /* song-wide lyric/audio offset, kept in the dataset's meta (export reads it) */
+  setTimeOffset: (name: string, timeOffset: number) =>
+    fetch(`${BASE}/api/songs/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ time_offset: timeOffset }),
+    }).then((r) => json<{ time_offset: number }>(r)),
+
   /* stage background: stored server-side so the export sees it too */
   background: () =>
     fetch(`${BASE}/api/ui/background`).then((r) => json<StageBackground>(r)),

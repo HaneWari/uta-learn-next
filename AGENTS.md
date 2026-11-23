@@ -76,6 +76,16 @@ cd frontend && npx tsc --noEmit && npm run build
   (`POST /api/models/install`, status via `GET /api/models/status`). Build the
   pack once with `tools/build_portable.py --whisper-pack`; it is version-
   independent and shipped as `UtaLearnNext-whisper-small.zip` on the release.
+- **fallback alignment is chunked + kana-global** — `build_from_audio` does NOT
+  use the whole-track `_transcribe` + vocal-energy path anymore. It runs
+  `_transcribe_chunked` (30 s windows, keeps only each window's trusted middle),
+  then `_kana_match` does a single Needleman–Wunsch over all lyric kana vs all
+  transcript kana (kanji in either side is read through `analyze`), and
+  `_anchor_rows`/`_line_times` turn the matched kana into per-char times.
+  Lines with no anchors are interpolated; a run of unmatched leading lines is
+  clipped (`found[0] > 2`) as is a trailing run past `song_end` (the last
+  transcript word's end, not the file duration). Keep `align`/`lcs_ratio`/`norm`
+  for `retime.fit`.
 - **`.git` is read-only in the sandbox** — commits and pushes require escalation.
 
 ## Git
