@@ -17,68 +17,89 @@
 
 ## 界面预览
 
-**跟唱舞台** —— 逐字高亮只标汉字的假名注音、罗马音、中文翻译；下方是当前这一句的词汇卡与句型卡。
+**跟唱舞台** —— 逐字高亮只标汉字的假名注音、罗马音、中文翻译；下方是当前这一句的词条卡与句型卡。
 
-![跟唱舞台](docs/screenshots/hero.png)
+![跟唱舞台](docs/screenshots/stage.png)
 
-**词汇卡与句型卡** —— 辞书形 + 读音 + 词性 + JLPT + 中文释义；歌里用的是屈折形时，会另外标出实际形式。
+**配置** —— 放入自己下载的音频，三种来源选一份，剩下的交给它。
 
-![词汇卡与句型卡](docs/screenshots/cards.png)
+![配置](docs/screenshots/config.png)
 
-**导出成片** —— 一键导出 1920×1080 / 60fps。下图取自实际导出的 mp4，可见逐字高亮正在擦过「雨」字。
+**选歌词 · 搜索** —— 一次查 QQ 音乐 / 酷狗 / Lrclib，带「逐字」的源有每个字的时间戳。
 
-![导出成片](docs/screenshots/export.png)
+![搜索歌词](docs/screenshots/pick_search.png)
 
-**配置** —— 放入自己下载的音频，选一份歌词源，剩下的交给它。
+**选歌词 · 自定义** —— 粘贴自己的歌词文本，whisper 在你上传的音频上离线对齐；装扩展后可顺带生成中文翻译。
 
-![配置界面](docs/screenshots/config.png)
+![自定义歌词](docs/screenshots/pick_custom.png)
+
+**已生成** —— 所有数据集都在这一步，随时回到跟唱或清理。
+
+![已生成](docs/screenshots/generated.png)
+
+**改歌词、改卡片** —— 双击歌词行进编辑（含自定义读音写法）；双击卡片进入编辑、拖动排序、右键删除；右键空白处新建卡片或整首隐藏词条/翻译。
+
+![歌词编辑](docs/screenshots/lyric_edit.png)
+![右键菜单](docs/screenshots/menu.png)
+
+**导出前会检查环境** —— Playwright / Chromium 内核浏览器 / ffmpeg 逐项探测，缺了给「自动修复」或装 Chromium 扩展包的入口。
+
+![导出环境检查](docs/screenshots/export_env.png)
 
 ---
 
 ## 快速开始
 
-需要 **Python 3.12+**、**Node.js 18+**，以及 PATH 里的 **ffmpeg**。
-
-Windows 双击 **`dev.cmd`**；macOS / Linux 运行 **`./dev.sh`**。
-首次运行会自动装依赖并构建前端，之后秒开。浏览器会打开 <http://localhost:8000/>。
-
-| 命令                   | 作用                                     |
-| ---------------------- | ---------------------------------------- |
-| `dev.cmd` / `./dev.sh` | 需要时才构建，单进程起在 :8000           |
-| `dev.cmd --rebuild`    | 强制重新构建前端                         |
-| `./dev.sh --dev`       | 前端走 vite :5173 热更新，API 仍在 :8000 |
-
-一个进程同时提供页面和 API，关掉窗口即停止。
-
-### 免安装（解压即用）
-
-不想装 Python / Node / ffmpeg，直接用发行包。**一个核心包 + 两个可选扩展包**，按需下载：
+**普通用户直接下发行包，免安装、解压即用。** 只有核心包必须下，两个扩展包按需——
+而且两个扩展包都能在应用里**一键下载安装**（需要时会弹出对应入口），
+无特殊情况不必手动去发行版页面。
 
 | 压缩包 | 体积 | 说明 |
 | --- | --- | --- |
 | `UtaLearnNext-<版本>.zip` | ~290 MB | 完整应用：搜索歌词、生成、跟唱、词汇卡、歌词/卡片编辑。本机有任意 Chromium 内核浏览器（Chrome / Edge / Brave / 360 / QQ 等）即可直接导出视频。 |
-| `UtaLearnNext-chromium.zip` | ~316 MB | 可选扩展包（**版本无关**）：内置 Chromium。没有 Chromium 内核浏览器又想导出视频时，解压到应用目录得到 `browsers/` 即可。 |
-| `UtaLearnNext-custom-lyrics.zip` | ~490 MB | 可选扩展包（**版本无关**）：自定义歌词用的语音识别 + 日→中翻译模型。解压到应用目录得到 `models/`（内含 `whisper-small/` 与 `translate-ja-zh/`），重启后即可离线对齐与翻译；不需要此功能可不下载。 |
+| `UtaLearnNext-chromium.zip` | ~316 MB | 可选扩展包（**版本无关**）：内置 Chromium。本机没有 Chromium 内核浏览器又想导出视频时才需要——「导出视频」会先检测环境，缺了可点「安装 Chromium 扩展包」自动装好；手动解压到应用目录得到 `browsers/` 也行。 |
+| `UtaLearnNext-custom-lyrics.zip` | ~490 MB | 可选扩展包（**版本无关**）：自定义歌词用的 whisper 识别 + 日→中翻译模型。在「自定义歌词」面板点「下载并安装扩展」自动装到 `models/`；手动解压到应用目录得到 `models/`（内含 `whisper-small/` 与 `translate-ja-zh/`）也行。不用自定义歌词就不用下。 |
 
 核心包解压后双击 **`启动 Uta Learn Next.cmd`** 即可。自带 Python 运行时、ffmpeg/ffprobe
 与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。需要导出但本机没有
 Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium 扩展包解压进来就行——
 程序下次启动会自动识别 `browsers/`，不用装、不用改配置。
 
-两个扩展包都**与版本无关**：浏览器二进制和冻结的语音模型远比应用更新慢，下载一次即可
-在任意版本上复用，升级应用不必重下。
-
-**自定义歌词**（把自己的歌词文本对到音频上）用到的模型**不随包分发**，
-单独作为 `UtaLearnNext-custom-lyrics.zip` 扩展包提供——内含 whisper 语音识别与
-日→中翻译两个模型，不依赖版本，下载一次即可。最省事的方式是
-在「自定义歌词」面板点「**下载并安装扩展**」，程序会从本仓库最新发行版拉取并自动
-解压到 `models/`；也可手动下载该 zip 解压到应用目录得到 `models/`。
-重启后离线可用；不用自定义歌词就完全不占空间。
+两个扩展包都**与版本无关**：浏览器二进制和冻结的语音模型远比应用更新慢，
+下载一次即可在任意版本上复用，升级应用不必重下。
 
 数据默认写在文件夹内的 `localdata/` 与 `exports/`（便携语义，整个文件夹可拷走）；
 如果文件夹不可写（例如解压到受保护目录），会自动回退到 `%LOCALAPPDATA%\UtaLearnNext\`。
 
-自己打包：
+<details>
+<summary><strong>开发者：从源码运行</strong>（需要 Python 3.12+、Node.js 18+、PATH 里的 ffmpeg）</summary>
+
+```bash
+# Windows
+dev.cmd              # 需要时才构建，单进程起在 :8000
+dev.cmd --rebuild    # 强制重新构建前端
+
+# macOS / Linux
+./dev.sh             # 同上
+./dev.sh --dev       # 前端走 vite :5173 热更新，API 仍在 :8000
+```
+
+首次运行会自动装依赖并构建前端，之后秒开；浏览器打开 <http://localhost:8000/>。
+一个进程同时提供页面和 API，关掉窗口即停止。
+
+```bash
+cd backend && python -m uvicorn main:app --reload --port 8000   # 后端热重载
+cd frontend && npm run dev                                       # 前端 vite 开发服
+```
+
+```bash
+docker compose up --build                                        # 或者直接用 Docker
+```
+
+</details>
+
+<details>
+<summary><strong>自己打包发行版</strong></summary>
 
 ```bash
 python tools/build_portable.py                    # 核心包 + chromium 扩展包
@@ -93,11 +114,7 @@ ffmpeg 用的是 **essentials（精简）构建**：静态链接、单个约 104
 仍包含本应用需要的 `libx264`、`aac`、常见音频解码器与 `fps/setpts/tpad` 滤镜。
 只有罕见格式（wma/ape/amr 等）可能解不开，导出与跟唱不受影响。
 
-### Docker
-
-```bash
-docker compose up --build
-```
+</details>
 
 ---
 
@@ -114,7 +131,7 @@ docker compose up --build
 **第 2 步 · 选择歌词来源**，两种方式：
 
 - **搜索歌词**：同时查 QQ 音乐、酷狗、Lrclib。QQ 音乐和酷狗给的是**逐字时间戳**
-  （每个字都有起止时间，高亮最准），Lrclib 只有行级时间，行内按音拍长度分配。
+  （每个字都有起止时间，高亮最准），Lrclib 只有行级时间。
 - **自定义歌词**：直接粘贴文本，每行一句，不需要时间轴，用 whisper 在你上传的音频上自动对齐。
   对齐用的是「切片转写 + 全曲假名全局对齐 + 逐字锚定」：whisper 分短窗识别出词，
   再把所有歌词假名与所有识别假名做一次全局动态规划，逐个音取回它在转写里的时间；
@@ -126,13 +143,10 @@ docker compose up --build
   - 该功能需要模型扩展包：在自定义歌词面板点「**下载并安装扩展**」一键装好
   （从本仓库最新发行版拉取 `UtaLearnNext-custom-lyrics.zip`，含 whisper 识别 +
   日→中翻译两个模型），或手动下载该 zip 解压到应用目录得到 `models/`。
-  装好并勾选「开启中文翻译」后，生成时会顺带为每句产出中文翻译。
+  装好扩展后，自定义歌词页的「开启中文翻译」开关会在生成时为每句顺带产出
+  中文翻译（int8 模型约 80MB）；不装扩展或不开开关就只对齐不翻译。
 
 **第 3 步 · 生成**，完成后自动跳到播放页。
-
-生成时若勾选了「开启中文翻译」，会在对齐完成后用自带的日→中翻译模型
-（int8，约 80MB，随自定义歌词扩展包提供）为每一句生成中文翻译；
-未装翻译扩展时会在任务里提示，不影响歌词对齐本身。
 
 ### 播放：跟唱
 
@@ -160,44 +174,10 @@ docker compose up --build
 
 ## 音频与歌词版本不一致怎么办
 
-自己下载的音频常常和搜到的歌词不是同一版：片头被剪、TV size、重制版快一点点。
-手动裁剪基本对不准，因为两条时间轴差的既有**偏移**也有**缩放**。
-
-系统会自动处理：
-
-1. 用 whisper 在你的音频上取词级锚点
-2. 把源歌词行与锚点做单调 DP 对齐
-3. 用稳健回归（Theil–Sen，先剔除离群锚点）拟合 `t_你的音频 = a + b · t_源`
-   - `a` 吸收偏移（剪掉的前奏）
-   - `b` 吸收速度差（重制、编码差异）
-   - **`b` 只在足够大时才采纳**（见下）
-4. 把变换套到源的**逐字**时间戳上，并按音频时长裁剪——自动对齐到较短的那个
-
-关键是**保留源数据源的逐字精度**，只修正整体差异；而不是把歌词当纯文本重新对齐（那样会丢掉逐字信息）。
-
-whisper 的词起点比真实起唱平均早约 0.45 秒（实测词起点 −0.49s、词终点 −1.36s、中点 −0.90s，
-所以锚定词起点最优，再用常量补偿）。这个量可用环境变量 `UTALEARN_ONSET_LEAD` 调整。
-
-### 为什么有时会「忽略」速度差
-
-whisper 的起唱偏差不是固定值，会沿歌曲缓慢漂移，而漂移在数学上**和真实速度差长得一模一样**，
-用锚点残差无法区分：受控实验里（把 braveheart 音频剪掉前 20 秒，真值就是 `b = 1`），自由拟合跑出
-`b = 0.99582`，而且它的 RMS 残差**比只用偏移的拟合还低**。照单全收会让歌曲末尾累积 0.375 秒误差。
-
-所以这里用先验而不是残差判断：只有同时满足 `|b−1| ≥ 0.6%` 且累计漂移 `≥ 1.2 秒` 才采纳斜率，
-否则退回纯偏移。代价是 0.5% 以下的真实速度差会被有意忽略（此时全曲最大误差约 0.4 秒）。
-
-实测（`tools/check_retime.py` 可复跑）：
-
-| 场景                          | 拟合                              | 真值                 | 最大误差     |
-| ----------------------------- | --------------------------------- | -------------------- | ------------ |
-| 真实音频剪掉前 20 秒          | `a = -19.97s`、`b = 1.0`，12 锚点 | a = −20、b = 1       | **0.032 秒** |
-| 合成真实速度差 +1.6%          | `a = -51.45s`、`b = 1.016`        | a = −51.9、b = 1.016 | < 0.01 秒    |
-| 合成真实速度差 −1.0%          | `a = -11.55s`、`b = 0.99`         | a = −12、b = 0.99    | < 0.01 秒    |
-| 亚阈值速度差 0.5%（有意忽略） | `a = -12.01s`、`b = 1.0`          | a = −12、b = 0.995   | 0.41 秒      |
-
-拟合不可靠时（锚点太少、残差过大）会自动退回「把歌词当纯文本用 whisper 重新对齐」，不会产出错乱的时间轴。
-音频只覆盖歌曲一部分时，尾部的歌词行会被裁掉；偏移后落在 0 之前的行会钳到 0。
+自己下载的音频常常和搜到的歌词不是同一版：片头被剪、TV size、重制版多一段。
+两条时间轴只要时长差超过约 2 秒，生成前会提示**手动裁剪**——告诉程序哪一条
+更长（歌词轴或音频）、从它内部的第几分几秒开始才是歌词真正唱的地方，生成时
+就把短的那条裁到一致。不需要整段重对。
 
 ---
 
@@ -281,8 +261,7 @@ backend/
   main.py                 FastAPI 路由：搜索 / 上传 / 构建 / 播放 / 导出 / 背景
   app/
     sources.py            QQ 音乐、酷狗、Lrclib 歌词源
-    builder.py            歌词 → 数据集（时间重映射、裁剪）
-    retime.py             版本不一致时的自动重对时
+    builder.py            歌词 → 数据集（裁剪起点、时间重映射）
     fallback.py           whisper 切片转写 + 假名全局对齐 + 逐字锚定
     translate.py          离线日→中翻译（opus-mt int8 CT2 + sentencepiece）
     dicts.py              分词、词典/句型查询、罗马音
@@ -309,7 +288,7 @@ exports/                  导出的成片（不提交）
   由自定义歌词扩展包解压得到，不随核心包分发）
 - `exports/` — 导出的 MP4
 
-`localdata/` 与 `exports/` 都在 `.gitignore` 里。
+`localdata/`、`models/` 与 `exports/` 都在 `.gitignore` 里。
 
 ---
 
@@ -320,8 +299,6 @@ exports/                  导出的成片（不提交）
 | `DATA_DIR`            | `../localdata`          | 数据集目录                                |
 | `EXPORT_DIR`          | `../exports`            | 成片输出目录                              |
 | `DEFAULT_SONG`        | `braveheart`            | 首次打开时的默认曲目                      |
-| `UTALEARN_ONSET_LEAD` | `0.45`                  | whisper 起唱提前量的补偿秒数，设 `0` 关闭 |
-| `UTALEARN_WHISPER`    | `large-v3`（无扩展包时） | 自定义歌词用的 whisper 模型名；装了 `models/` 扩展包时直接读本地目录 |
 | `UTALEARN_BASE_URL`   | `http://127.0.0.1:8000` | 导出时无头浏览器访问本服务的地址          |
 | `UTALEARN_CHROME`     | 自动探测                | 导出用的 Chromium 路径                    |
 | `UTALEARN_DATA_DIR`   | `localdata`             | `tools/backfill_glosses.py` 的目标目录    |
@@ -341,8 +318,8 @@ cd frontend && npm run dev
 # 类型检查与构建
 cd frontend && npx tsc --noEmit && npm run build
 
-# 重对时回归检查
-python tools/check_retime.py
+# 导出音画同步回归检查
+python tools/check_export_sync.py exports/xxx.mp4 --audio localdata/<歌名>/audio.mp3
 ```
 
 接口一览：`/api/sources`、`/api/search`、`/api/uploads`、`/api/build`、`/api/build-text`、

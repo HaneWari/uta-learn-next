@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import export, fallback, jobs, retime
+from app import export, fallback, jobs
 from app import translate as translate_mod
 from app.builder import _is_credit
 from app.builder import build as build_song
@@ -276,45 +276,6 @@ def _upload_path(upload_id: str) -> Path:
 
 
 
-def _try_retime(parsed, audio: Path, progress) -> dict | None:
-    """Fit the source timeline onto `audio`; None when the fit is not trusted.
-
-    Runs whisper once. The transcription is cached on the ParsedLyrics object so
-    a failed fit can fall straight through to the whisper build without paying
-    for a second pass.
-    """
-    cached = getattr(parsed, "_wsegs", None)
-    if cached is None:
-        progress(0.15, "识别你的音频，用于对齐版本差异…")
-        try:
-            wav = fallback.to_wav(audio)
-            x, sr = fallback.load_wav(wav)
-            wsegs = fallback._transcribe(x, progress)
-        except Exception as e:  # noqa: BLE001
-            progress(0.18, f"识别失败，改用其他方式：{e}")
-            return None
-        finally:
-            try:
-                wav.unlink(missing_ok=True)
-            except Exception:  # noqa: BLE001
-                pass
-        parsed._wsegs = wsegs
-    else:
-        wsegs = cached
-
-    if not wsegs:
-        return None
-    try:
-        fitted = retime.fit(parsed, wsegs)
-    except Exception:  # noqa: BLE001
-        return None
-    if not fitted or not fitted.get("ok"):
-        if fitted:
-            progress(0.20, f"重对时不可靠（残差 {fitted['residual']:.2f}s），改用全量对齐")
-        return None
-    return fitted
-
-
 def _lyric_lines(parsed, title: str, artist: str, source_song: Song | None = None) -> list[str]:
     """Plain lyric text lines from a parsed source, credits dropped.
 
@@ -554,7 +515,7 @@ async def api_build_text(payload: dict):
         data = fallback.build_from_audio(audio, lines, {
             "title": title, "artist": artist,
             "youtube_url": "", "language": "ja",
-            "whisperx_model": os.environ.get("UTALEARN_WHISPER", "large-v3"),
+            "whisperx_model": "",
             "align_model": "whisper 切片转写 + 假名全局对齐 + 逐字锚定",
             "vocal_separation": "none",
             "source": "本地上传 + whisper",
