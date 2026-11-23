@@ -3,6 +3,7 @@ import { api, waitForJob } from "./api";
 import { useSongData } from "./hooks/useSongData";
 import { BackgroundModal } from "./components/BackgroundModal";
 import { ConfigPage } from "./components/ConfigPage";
+import { ExportEnvModal } from "./components/ExportEnvModal";
 import { OffsetModal } from "./components/OffsetModal";
 import { Stage } from "./components/Stage";
 import type { SongSummary, StageBackground } from "./types";
@@ -23,6 +24,8 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [exportPct, setExportPct] = useState(0);
   const [exportNote, setExportNote] = useState<string | null>(null);
+  const [envOpen, setEnvOpen] = useState(false);
+  const [envChecking, setEnvChecking] = useState(false);
   const [background, setBackground] = useState<StageBackground>(DEFAULT_BG);
   const [bgOpen, setBgOpen] = useState(false);
   const [offsetOpen, setOffsetOpen] = useState(false);
@@ -68,9 +71,28 @@ export default function App() {
 
   const runExport = useCallback(async () => {
     if (!song || exporting) return;
+    // Check the export environment first: a green probe falls straight through
+    // to the export; anything wrong opens the env modal with a fix instead of
+    // a bare failure toast. The button shows a brief "checking" state so the
+    // click doesn't feel dead while the probe runs.
+    setEnvChecking(true);
+    setExportNote(null);
+    try {
+      const env = await api.exportEnv();
+      if (!env.ok) {
+        setEnvOpen(true);
+        return;
+      }
+    } catch {
+      // probe itself failed — still offer the modal so the user can retry/fix
+      setEnvOpen(true);
+      return;
+    } finally {
+      setEnvChecking(false);
+    }
+
     setExporting(true);
     setExportPct(0);
-    setExportNote(null);
     try {
       // the hidden-cards flag has to reach the recorder page: its fresh
       // browser profile can't see our localStorage, so it goes in the URL
@@ -201,14 +223,54 @@ export default function App() {
         </button>
 
         <button
-          className={`exportbtn${exporting ? " busy" : ""}`}
+          className={`exportbtn${exporting || envChecking ? " busy" : ""}`}
           onClick={() => void runExport()}
-          disabled={!song || exporting}
+          disabled={!song || exporting || envChecking}
           title="把当前这首渲染成 1920×1080 / 60fps 的 MP4"
         >
-          {exporting ? `导出中 ${exportPct}%` : "导出视频"}
+          {envChecking
+            ? "检查环境…"
+            : exporting
+              ? `导出中 ${exportPct}%`
+              : "导出视频"}
         </button>
       </nav>
+
+      {envOpen && (
+        <ExportEnvModal
+          onClose={() => setEnvOpen(false)}
+          onReady={() => {
+            setEnvOpen(false);
+            // environment just turned green — run the export for real. Bypass
+            // the probe this time so a borderline check doesn't loop.
+            void (async () => {
+              if (!song) return;
+              setExporting(true);
+              setExportPct(0);
+              try {
+                const hideCards = localStorage.getItem(`hideCards:${song}`) === "1";
+                const { job_id } = await api.startExport(song, hideCards);
+                const job = await waitForJob(
+                  job_id,
+                  (j) => setExportPct(Math.round(j.progress * 100)),
+                  1200,
+                );
+                if (job.status === "error") {
+                  setExportNote(job.error ?? "导出失败");
+                } else {
+                  const dir = (job.result as { dir?: string } | null)?.dir;
+                  const file = (job.result as { file?: string } | null)?.file;
+                  setExportNote(dir ? `已导出至 ${dir}\n${file ?? ""}` : "导出完成");
+                }
+              } catch (e) {
+                setExportNote(e instanceof Error ? e.message : String(e));
+              } finally {
+                setExporting(false);
+              }
+            })();
+          }}
+        />
+      )}
 
       {bgOpen && (
         <BackgroundModal

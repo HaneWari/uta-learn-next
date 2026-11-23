@@ -660,6 +660,141 @@ def api_model_install():
     return {"job_id": jid}
 
 
+# --------------------------------------------------------------------------- #
+# export environment: bundled-Chromium extension pack + playwright self-fix
+# --------------------------------------------------------------------------- #
+# The core zip ships the `playwright` *package* but no browser binary. On a
+# machine whose own browser is Chromium-based the export just borrows it; when
+# it isn't (Firefox / no browser / a broken webview), the user can either let
+# the app repair playwright or pull the version-free `chromium` extension pack
+# — same release-asset mechanism as the whisper model.
+
+CHROMIUM_ASSET = "UtaLearnNext-chromium.zip"
+
+
+def _browsers_dir() -> Path:
+    return Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH", APP_ROOT / "browsers"))
+
+
+def _chromium_pack_installed() -> bool:
+    d = _browsers_dir()
+    return d.is_dir() and any(d.glob("chromium-*"))
+
+
+def _latest_chromium_url() -> str:
+    return (f"https://github.com/{GITHUB_REPO}/releases/latest/download/"
+            f"{CHROMIUM_ASSET}")
+
+
+@app.get("/api/export/env")
+def api_export_env():
+    """Deep export-environment probe run on demand (not cached).
+
+    The frontend calls this when the user clicks 导出视频, so the answer is
+    always about the machine *right now* — a browser installed since startup
+    shows up without an app restart.
+    """
+    return export.env_check()
+
+
+@app.post("/api/export/fix-playwright")
+def api_export_fix_playwright():
+    """Try to repair the playwright runtime: pip-install the package and pull
+    its matching chromium build. Cheap when already present, a real fix when
+    the package was stripped or its browser download was interrupted.
+    """
+    jid = jobs.create("export-fix")
+
+    def work(progress):
+        import subprocess
+        import sys
+
+        progress(0.1, "检查 playwright 包…")
+        try:
+            import playwright  # noqa: F401
+            progress(0.4, "playwright 已安装，补装浏览器…")
+        except Exception:  # noqa: BLE001
+            progress(0.15, "安装 playwright …")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "-q", "playwright"],
+                check=True, capture_output=True)
+            progress(0.4, "playwright 装好，下载浏览器…")
+
+        progress(0.55, "下载 Chromium（约 130MB，请稍候）…")
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            check=True, capture_output=True, env=dict(os.environ))
+
+        progress(0.9, "验证浏览器…")
+        c = export.env_check()
+        if not c["checks"]["browser_launch"]:
+            raise RuntimeError(
+                "playwright 已修复但浏览器仍无法启动：" +
+                (c["checks"]["launch_error"] or "未知原因"))
+        progress(0.98, "完成")
+        return {"ok": True, "env": c}
+
+    jobs.run(jid, work)
+    return {"job_id": jid}
+
+
+@app.post("/api/export/install-chromium")
+def api_export_install_chromium():
+    """Download + unpack the bundled-Chromium extension pack.
+
+    Used when the machine has no usable Chromium-core browser *and* the
+    playwright route can't help (e.g. its download is blocked). The zip drops a
+    `browsers/` folder next to the app, exactly like the manual extension.
+    """
+    if _chromium_pack_installed():
+        return {"job_id": None, "installed": True}
+    jid = jobs.create("chromium-install")
+
+    def work(progress):
+        import io
+        import zipfile
+        import httpx
+
+        progress(0.05, "查询最新发行版…")
+        url = _latest_chromium_url()
+        progress(0.10, "下载 Chromium 扩展包（约 316MB，请稍候）…")
+        buf = io.BytesIO()
+        with httpx.Client(timeout=None, follow_redirects=True) as c:
+            with c.stream("GET", url) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("content-length") or 0)
+                got = 0
+                for chunk in r.iter_bytes(1 << 20):
+                    buf.write(chunk)
+                    got += len(chunk)
+                    if total:
+                        progress(0.10 + 0.70 * got / total,
+                                 f"下载 Chromium 扩展包… {got // 1048576}MB")
+        progress(0.85, "解压到应用目录…")
+        buf.seek(0)
+        with zipfile.ZipFile(buf) as z:
+            for member in z.namelist():
+                rel = member[len("UtaLearnNext/"):] \
+                    if member.startswith("UtaLearnNext/") else member
+                if not rel.startswith("browsers/"):
+                    continue
+                target = APP_ROOT / rel
+                if member.endswith("/"):
+                    target.mkdir(parents=True, exist_ok=True)
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with z.open(member) as src, target.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+        if not _chromium_pack_installed():
+            raise RuntimeError("解压后未找到 browsers/chromium-* 目录")
+        progress(0.98, "安装完成")
+        return {"installed": True, "needs_restart": True,
+                "path": str(_browsers_dir())}
+
+    jobs.run(jid, work)
+    return {"job_id": jid}
+
+
 @app.get("/api/songs")
 def api_songs():
     return list_datasets()

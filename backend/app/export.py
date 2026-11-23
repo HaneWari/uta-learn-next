@@ -125,17 +125,97 @@ def _chrome(pw=None) -> str | None:
 
 
 def available() -> tuple[bool, str]:
-    """(can export, why not)"""
+    """(can export, why not) — thin wrapper over env_check for the export job."""
+    c = env_check()
+    if c["ok"]:
+        return True, ""
+    return False, {
+        "no_playwright": "没有安装 playwright（python -m pip install playwright）",
+        "no_browser": "没找到可用的 Chromium 内核浏览器（Chrome / Edge / Brave / 其他均可）",
+        "no_ffmpeg": "没找到 ffmpeg",
+    }.get(c["state"], "导出环境不可用")
+
+
+def _has_bundled_chromium() -> bool:
+    """True when an extension-pack Chromium sits next to the app (`browsers/`)."""
+    root = Path(__file__).resolve().parents[2] / "browsers"
+    if not root.is_dir():
+        return False
+    for b in root.glob("chromium-*"):
+        for rel in ("chrome-win64/chrome.exe", "chrome-linux/chrome",
+                    "chrome-mac/Chromium.app/Contents/MacOS/Chromium"):
+            if (b / rel).exists():
+                return True
+    return False
+
+
+def probe_browser(exe: str, timeout_ms: int = 15000) -> tuple[bool, str]:
+    """Actually launch the resolved browser once — a path that exists is not
+    proof it runs (64-bit exe on ARM, killed DLL, blocked by policy…).
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:  # noqa: BLE001
+        return False, f"playwright 不可用：{e}"
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                executable_path=exe, timeout=timeout_ms,
+                args=["--no-sandbox", "--disable-gpu"])
+            page = browser.new_context().new_page()
+            page.goto("about:blank")
+            browser.close()
+        return True, ""
+    except Exception as e:  # noqa: BLE001
+        return False, str(e)[:300]
+
+
+def env_check() -> dict:
+    """Detailed environment diagnosis for the export feature.
+
+    Returns a machine-readable `state` plus the concrete checks so the UI can
+    decide which fix to offer:
+
+      ok           — a Chromium browser launched fine, export will work
+      no_playwright — the python package itself is missing → offer pip fix
+      no_browser   — playwright is there but nothing launches → offer the
+                     bundled-Chromium extension pack
+      no_ffmpeg    — browser is fine but the mux tool is missing
+    """
     try:
         import playwright  # noqa: F401
+        has_playwright = True
     except Exception:  # noqa: BLE001
-        return False, "没有安装 playwright（python -m pip install playwright）"
-    if _chrome() is None:
-        return False, "没找到 Chromium 内核浏览器（Chrome / Edge / Brave / 其他均可）"
-    if binaries.find("ffmpeg") is None:
-        return False, "没找到 ffmpeg"
-    return True, ""
+        has_playwright = False
 
+    exe = _chrome() if has_playwright else None
+    launch_ok, launch_err = (False, "")
+    if exe:
+        launch_ok, launch_err = probe_browser(exe)
+
+    has_ffmpeg = binaries.find("ffmpeg") is not None
+
+    if not has_playwright:
+        state = "no_playwright"
+    elif launch_ok and has_ffmpeg:
+        state = "ok"
+    elif not launch_ok:
+        state = "no_browser"
+    else:
+        state = "no_ffmpeg"
+
+    return {
+        "ok": state == "ok",
+        "state": state,
+        "checks": {
+            "playwright": has_playwright,
+            "browser_path": exe,
+            "bundled_chromium": _has_bundled_chromium(),
+            "browser_launch": launch_ok,
+            "launch_error": launch_err,
+            "ffmpeg": has_ffmpeg,
+        },
+    }
 
 
 # --------------------------------------------------------------------------- #

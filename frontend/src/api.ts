@@ -1,4 +1,5 @@
 import type {
+  ExportEnv,
   Job,
   SearchHit,
   SongSummary,
@@ -87,6 +88,19 @@ export const api = {
   exportStatus: () =>
     fetch(`${BASE}/api/export/status`).then((r) =>
       json<{ available: boolean; reason: string }>(r),
+    ),
+
+  /* deep export-environment probe, run fresh on every 导出视频 click */
+  exportEnv: () =>
+    fetch(`${BASE}/api/export/env`).then((r) => json<ExportEnv>(r)),
+
+  fixPlaywright: () =>
+    post<{ job_id: string }>("/api/export/fix-playwright", {}),
+
+  installChromium: () =>
+    post<{ job_id: string | null; installed?: boolean }>(
+      "/api/export/install-chromium",
+      {},
     ),
 
   exports: () =>

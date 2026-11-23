@@ -138,6 +138,22 @@ export interface Job {
   error: string | null;
 }
 
+/* ---------- export environment ---------- */
+
+export interface ExportEnv {
+  ok: boolean;
+  /** ok | no_playwright | no_browser | no_ffmpeg */
+  state: "ok" | "no_playwright" | "no_browser" | "no_ffmpeg";
+  checks: {
+    playwright: boolean;
+    browser_path: string | null;
+    bundled_chromium: boolean;
+    browser_launch: boolean;
+    launch_error: string;
+    ffmpeg: boolean;
+  };
+}
+
 /* ---------- stage background ---------- */
 
 export interface StageBackground {
