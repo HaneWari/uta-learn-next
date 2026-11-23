@@ -199,41 +199,47 @@ export default function App() {
           </button>
         </div>
 
-        <button
-          className="exportbtn bgbtn"
-          onClick={() => {
-            // tuning is done by ear against the stage, so bring it up
-            setTab("stage");
-            setOffsetOpen(true);
-          }}
-          disabled={!songData}
-          title="调整当前这首的高亮、切句与歌声之间的时间差"
-        >
-          {timeOffset
-            ? `时间偏移 ${timeOffset > 0 ? "+" : ""}${timeOffset.toFixed(1)}s`
-            : "时间偏移"}
-        </button>
+        {/* stage-only controls: meaningless (and confusing) on the config tab,
+            so they only exist once a song is actually loaded for playback */}
+        {tab === "stage" && (
+          <>
+            <button
+              className="exportbtn bgbtn"
+              onClick={() => {
+                // tuning is done by ear against the stage, so bring it up
+                setTab("stage");
+                setOffsetOpen(true);
+              }}
+              disabled={!songData}
+              title="调整当前这首的高亮、切句与歌声之间的时间差"
+            >
+              {timeOffset
+                ? `时间偏移 ${timeOffset > 0 ? "+" : ""}${timeOffset.toFixed(1)}s`
+                : "时间偏移"}
+            </button>
 
-        <button
-          className="exportbtn bgbtn"
-          onClick={() => setBgOpen(true)}
-          title="更换播放页的背景图"
-        >
-          设置背景
-        </button>
+            <button
+              className="exportbtn bgbtn"
+              onClick={() => setBgOpen(true)}
+              title="更换播放页的背景图"
+            >
+              设置背景
+            </button>
 
-        <button
-          className={`exportbtn${exporting || envChecking ? " busy" : ""}`}
-          onClick={() => void runExport()}
-          disabled={!song || exporting || envChecking}
-          title="把当前这首渲染成 1920×1080 / 60fps 的 MP4"
-        >
-          {envChecking
-            ? "检查环境…"
-            : exporting
-              ? `导出中 ${exportPct}%`
-              : "导出视频"}
-        </button>
+            <button
+              className={`exportbtn${exporting || envChecking ? " busy" : ""}`}
+              onClick={() => void runExport()}
+              disabled={!song || exporting || envChecking}
+              title="把当前这首渲染成 1920×1080 / 60fps 的 MP4"
+            >
+              {envChecking
+                ? "检查环境…"
+                : exporting
+                  ? `导出中 ${exportPct}%`
+                  : "导出视频"}
+            </button>
+          </>
+        )}
       </nav>
 
       {envOpen && (

@@ -58,7 +58,7 @@ Windows 双击 **`dev.cmd`**；macOS / Linux 运行 **`./dev.sh`**。
 | --- | --- | --- |
 | `UtaLearnNext-<版本>.zip` | ~290 MB | 完整应用：搜索歌词、生成、跟唱、词汇卡、歌词/卡片编辑。本机有任意 Chromium 内核浏览器（Chrome / Edge / Brave / 360 / QQ 等）即可直接导出视频。 |
 | `UtaLearnNext-chromium.zip` | ~316 MB | 可选扩展包（**版本无关**）：内置 Chromium。没有 Chromium 内核浏览器又想导出视频时，解压到应用目录得到 `browsers/` 即可。 |
-| `UtaLearnNext-whisper-small.zip` | ~426 MB | 可选扩展包（**版本无关**）：自定义歌词用的语音识别模型。解压到应用目录得到 `models/whisper-small/` 后即可离线对齐歌词；不需要此功能可不下载。 |
+| `UtaLearnNext-custom-lyrics.zip` | ~490 MB | 可选扩展包（**版本无关**）：自定义歌词用的语音识别 + 日→中翻译模型。解压到应用目录得到 `models/`（内含 `whisper-small/` 与 `translate-ja-zh/`），重启后即可离线对齐与翻译；不需要此功能可不下载。 |
 
 核心包解压后双击 **`启动 Uta Learn Next.cmd`** 即可。自带 Python 运行时、ffmpeg/ffprobe
 与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。需要导出但本机没有
@@ -68,11 +68,12 @@ Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium 
 两个扩展包都**与版本无关**：浏览器二进制和冻结的语音模型远比应用更新慢，下载一次即可
 在任意版本上复用，升级应用不必重下。
 
-**自定义歌词**（把自己的歌词文本对到音频上）用到的 whisper 语音识别模型**不随包分发**，
-单独作为 `whisper-small` 扩展包提供——它不依赖版本，下载一次即可。最省事的方式是
+**自定义歌词**（把自己的歌词文本对到音频上）用到的模型**不随包分发**，
+单独作为 `UtaLearnNext-custom-lyrics.zip` 扩展包提供——内含 whisper 语音识别与
+日→中翻译两个模型，不依赖版本，下载一次即可。最省事的方式是
 在「自定义歌词」面板点「**下载并安装扩展**」，程序会从本仓库最新发行版拉取并自动
-解压到 `models/`；也可手动下载 `UtaLearnNext-whisper-small.zip` 解压到应用目录
-（得到 `models/whisper-small/model.bin`）。重启后离线可用；不用自定义歌词就完全不占空间。
+解压到 `models/`；也可手动下载该 zip 解压到应用目录得到 `models/`。
+重启后离线可用；不用自定义歌词就完全不占空间。
 
 数据默认写在文件夹内的 `localdata/` 与 `exports/`（便携语义，整个文件夹可拷走）；
 如果文件夹不可写（例如解压到受保护目录），会自动回退到 `%LOCALAPPDATA%\UtaLearnNext\`。
@@ -82,7 +83,7 @@ Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium 
 ```bash
 python tools/build_portable.py                    # 核心包 + chromium 扩展包
 python tools/build_portable.py --no-chromium      # 只出核心包
-python tools/build_portable.py --whisper-pack     # 只出 whisper 模型扩展包
+python tools/build_portable.py --custom-pack      # 只出自定义歌词扩展包（whisper+翻译）
 python tools/build_portable.py --no-zip           # 只生成文件夹
 python tools/build_portable.py --out D:/build     # 换构建目录（磁盘空间不够时用）
 python tools/build_portable.py --zip-out D:/rel --browsers-dir D:/br   # 大文件放别的盘
@@ -102,7 +103,7 @@ docker compose up --build
 
 ## 怎么用
 
-界面分「配置」和「展示」两个标签页。
+界面分「配置」和「播放」两个标签页。
 
 ### 配置：把一首歌变成可跟唱的数据集
 
@@ -122,19 +123,25 @@ docker compose up --build
   - **自定义读音**：某个汉字/词组要读成别的音时，写成 `[汉字](读音)`，
     例如 `[明日](あす)`、`[運命](さだめ)`；假名、片假名、罗马音（`[明日](asu)`）都行，
     方括号与圆括号用中文全角（`【】（）`）也认。
-  - 该功能需要语音识别模型：下载发行版里的 **`UtaLearnNext-whisper-small.zip`**，
-  在自定义歌词面板点「**下载并安装扩展**」一键装好（从本仓库最新发行版拉取），
-  或手动下载该 zip 解压到应用目录得到 `models/whisper-small/`（见下方安装表）。
+  - 该功能需要模型扩展包：在自定义歌词面板点「**下载并安装扩展**」一键装好
+  （从本仓库最新发行版拉取 `UtaLearnNext-custom-lyrics.zip`，含 whisper 识别 +
+  日→中翻译两个模型），或手动下载该 zip 解压到应用目录得到 `models/`。
+  装好并勾选「开启中文翻译」后，生成时会顺带为每句产出中文翻译。
 
-**第 3 步 · 生成**，完成后自动跳到展示页。
+**第 3 步 · 生成**，完成后自动跳到播放页。
 
-### 展示：跟唱
+生成时若勾选了「开启中文翻译」，会在对齐完成后用自带的日→中翻译模型
+（int8，约 80MB，随自定义歌词扩展包提供）为每一句生成中文翻译；
+未装翻译扩展时会在任务里提示，不影响歌词对齐本身。
+
+### 播放：跟唱
 
 - 空格 播放 / 暂停，← → 前后 5 秒
 - 倍速 0.25×–2×，点当前倍速向左展开选择
 - 右下角进度条可点击跳转
 - 导航栏「时间偏移」：如果高亮总比歌声早或晚一点，可以给这首歌设一个 −2～+2 秒（精确到 0.1 秒）的偏移。正数让高亮和切句延后，负数让它们提前。调的时候边听边看，改动立即生效；只影响这一首，导出视频同样生效
-- 导航栏「设置背景」可换展示页背景（默认纸感 / 自定义图片），「导出视频」渲染成 MP4
+- 导航栏「设置背景」可换播放页背景（默认纸感 / 自定义图片），「导出视频」渲染成 MP4
+- 右键舞台任意空白处弹出菜单：新建词条卡片、隐藏/显示词条卡片、隐藏/显示中文翻译
 
 #### 歌词也可以改
 
@@ -206,10 +213,20 @@ whisper 的起唱偏差不是固定值，会沿歌曲缓慢漂移，而漂移在
   现在用「播放开始→结束」的墙钟时长除以录制跨度得到缩放系数，`setpts` 校正后再转 60fps
 - 录完会读成片进度条像素反推音画偏差，必要时自动重混一次
 
+点「导出视频」会先**检查导出环境**：Playwright 运行库、能启动的 Chromium 内核
+浏览器、ffmpeg 三者缺一即弹出诊断，给出一键自动修复或安装内置 Chromium
+扩展包的入口——而不是只报一句「导出不可用」。
+
 需要 Playwright 驱动的 Chromium 内核浏览器与 ffmpeg——不一定是 Google Chrome，
 **任何 Chromium 内核浏览器都行**（Windows 自带的 Edge、Brave、Vivaldi、360、QQ 等）。
 浏览器路径可用 `UTALEARN_CHROME` 指定，否则按顺序探测：环境变量 → `browsers/` 扩展包 →
 Playwright 缓存 → 各常见安装路径（Edge/Brave/Vivaldi/国产浏览器都在探测列表里）→ PATH。
+
+导出实际用到**三个东西**，别和 `bin/` 里那个 ffmpeg 混淆：
+playwright 包驱动浏览器、Chromium 渲染画面、playwright **自带的** ffmpeg 把帧
+录成 webm（`record_video` 用，与 `bin/` 的 mux ffmpeg 是两份独立二进制）。
+缺浏览器 → 自动修复或装 `UtaLearnNext-chromium.zip`；缺录制组件 → 自动修复会
+补 `playwright install chromium ffmpeg`。
 
 ### 校验成片音画同步
 
@@ -247,10 +264,11 @@ python tools/check_export_sync.py exports/xxx.mp4 --audio localdata/<歌名>/aud
 - **拖动排序**：按住卡片左右拖，其余卡片实时让位，松手即定——顺序按当前句保存，
   不影响下一句的自动选词。
 - **右键卡片**删除该卡（有确认提示）。
-- **右键卡片栏空白处**（卡片之间、首尾卡外侧、词条带上下一带）弹出菜单：
+- **右键舞台任意空白处**（歌词区、卡片之间、首尾卡外侧、词条带上下一带）弹出统一菜单：
   - **新建词条卡片**：当前不足 4 张时补一张空白卡自己填；已满时会提示先删一张。
   - **隐藏 / 显示词条卡片**：整首歌都不想要卡时一键收起，只剩一条细提示条，
     再右键可恢复；**隐藏状态下导出的视频也不会出现卡片和任何提示字样**。
+  - **隐藏 / 显示中文翻译**：对整首歌生效；**隐藏状态下导出的视频也不含中文翻译行**。
 
 所有修改按「歌 + 句」保存在数据集里，下次打开还在；改动也会带进导出的视频。
 
@@ -266,12 +284,14 @@ backend/
     builder.py            歌词 → 数据集（时间重映射、裁剪）
     retime.py             版本不一致时的自动重对时
     fallback.py           whisper 切片转写 + 假名全局对齐 + 逐字锚定
+    translate.py          离线日→中翻译（opus-mt int8 CT2 + sentencepiece）
     dicts.py              分词、词典/句型查询、罗马音
     export.py             Playwright 录制 + ffmpeg 混流 + 自校准
     data/                 jadict.json（词典）、grammar.json（句型）
 frontend/src/
   App.tsx                 标签页、导航栏、导出与背景入口
-  components/             ConfigPage / Stage / Player / LyricsDisplay / VocabCards / BackgroundModal
+  components/             ConfigPage / Stage / Player / LyricsDisplay / VocabCards /
+                          BackgroundModal / OffsetModal / ExportEnvModal
   hooks/                  useSongData / useSyncEngine
   furigana.ts             只标汉字的注音切分
 tools/                    数据构建与回归检查（见 tools/README.md）
@@ -284,7 +304,9 @@ exports/                  导出的成片（不提交）
 - `localdata/<歌名>/song_data.json` — 时间轴、词元、词汇卡数据
 - `localdata/<歌名>/audio.mp3` — 该数据集的音频
 - `localdata/_uploads/` — 上传的原始音频（可清理）
-- `localdata/_ui/` — 展示页背景设置
+- `localdata/_ui/` — 播放页背景设置
+- `models/` — 扩展包模型目录（`whisper-small/` 语音识别、`translate-ja-zh/` 日→中翻译，
+  由自定义歌词扩展包解压得到，不随核心包分发）
 - `exports/` — 导出的 MP4
 
 `localdata/` 与 `exports/` 都在 `.gitignore` 里。
@@ -325,7 +347,8 @@ python tools/check_retime.py
 
 接口一览：`/api/sources`、`/api/search`、`/api/uploads`、`/api/build`、`/api/build-text`、
 `/api/jobs/{id}`、`/api/songs`、`/api/songs/{name}`、`/api/audio/{name}`、`/api/export`、
-`/api/exports`、`/api/ui/background`。
+`/api/exports`、`/api/export/env`、`/api/export/fix`、`/api/export/install-chromium`、
+`/api/models/status`、`/api/models/install`、`/api/ui/background`。
 
 ---
 
