@@ -16,9 +16,15 @@ interface LyricsDisplayProps {
 
 /** The text the listener actually sees: the override wins over the aligned
     original, and an emptied override hides the line's text without deleting
-    the underlying words. */
+    the underlying words. Reading marks `[汉字](よみ)` are markup, never sung —
+    strip them for display / char counting (full-width brackets too). */
+const READING_MARK = /[\[【]([^\]】]+)[\]】]\s*[（(][^（）()]*[)）]/g;
+function stripMarks(text: string): string {
+  return text.replace(READING_MARK, "$1");
+}
+
 function shownText(seg: Segment): string {
-  return seg.lyric_override?.text ?? seg.text ?? "";
+  return stripMarks(seg.lyric_override?.text ?? seg.text ?? "");
 }
 
 function shownZh(seg: Segment): string | undefined {
@@ -277,7 +283,10 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
               placeholder="中文翻译（可留空）"
               onChange={(e) => setDraft({ ...draft, zh: e.target.value })}
             />
-            <span className="lyr-edit-hint">回车或点击空白保存 · Esc 取消</span>
+            <span className="lyr-edit-hint">
+              回车或点击空白保存 · Esc 取消 · 改读音写作 <code>[汉字](读音)</code>
+              ，如 <code>[明日](あす)</code>，假名/片假名/罗马音均可
+            </span>
           </div>
         ) : (
           <>
@@ -292,10 +301,23 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, onPatch
               )
             ) : (
               <div className="cur-line">
-                {cur.lyric_override?.text != null ? (
-                  // a hand-edited line no longer matches the word timings —
-                  // show the corrected text verbatim instead of the stale
-                  // per-glyph wipe
+                {cur.lyric_override?.words?.length ? (
+                  // hand-edited line: the server re-tokenised it, so it still
+                  // carries furigana, romaji and a re-estimated wipe — just
+                  // not the stale source alignment
+                  cur.lyric_override.words.map((w, i) => (
+                    <WordView
+                      key={i}
+                      word={w}
+                      segmentId={cur.id}
+                      wordIndex={i}
+                      syncState={syncState}
+                      activeRef={activeRef}
+                    />
+                  ))
+                ) : cur.lyric_override?.text != null ? (
+                  // override exists but no words were rebuilt (very short or
+                  // unanalysable text) — show it verbatim, still clickable
                   <span className="cur-line-text">{shownText(cur)}</span>
                 ) : (
                   cur.words.map((w, i) => (

@@ -49,6 +49,9 @@ export interface Segment {
   lyric_override?: {
     text?: string;
     translation_zh?: string;
+    /** re-tokenised words for an edited text: carries its own furigana,
+        romaji and a re-estimated per-glyph wipe when the text changed */
+    words?: WordTiming[];
   } | null;
   grammar?: GrammarHit[];
   words: WordTiming[];

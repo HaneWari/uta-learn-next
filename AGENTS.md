@@ -46,6 +46,11 @@ cd frontend && npx tsc --noEmit && npm run build
 - **State** — the karaoke stage derives everything from `song_data.json` + the
   `segments` list. Any edit path (card override, lyric override, hidden flag) must
   round-trip through the `PATCH /api/songs/{name}` route, never a side channel.
+- **Reading marks** — users annotate a custom reading inline as `[汉字](よみ)`
+  (full-width `【】（）` also accepted, romaji readings like `[明日](asu)` work).
+  `dicts.parse_reading_marks` strips the mark-up *before* tokenisation and
+  `apply_reading_marks` re-writes the token `kana`/`romaji` after, so the tagger
+  never sees the brackets and the per-glyph wipe survives.
 
 ## Things that bite
 
@@ -61,6 +66,16 @@ cd frontend && npx tsc --noEmit && npm run build
   `contextmenu` listener in `VocabCards.tsx`, not CSS.
 - **Lyric edits & highlight** — only write `lyric_override.text` when the text
   actually changed; a translation-only edit must not kill the per-glyph wipe.
+  When `text` *did* change the PATCH route re-tokenises it (`builder.retime_words`)
+  into `lyric_override.words` + `grammar`, so an edited line still shows furigana,
+  romaji and a re-estimated wipe — it is not the verbatim static line it used to be.
+- **whisper is an extension pack** — `fallback._transcribe` prefers a bundled
+  `models/<name>/` dir (loaded straight off disk, works offline). The model is
+  *never* pulled from HuggingFace — a missing pack is a hard, actionable error,
+  and the config page can one-click-install it from the repo's latest release
+  (`POST /api/models/install`, status via `GET /api/models/status`). Build the
+  pack once with `tools/build_portable.py --whisper-pack`; it is version-
+  independent and shipped as `UtaLearnNext-whisper-small.zip` on the release.
 - **`.git` is read-only in the sandbox** — commits and pushes require escalation.
 
 ## Git

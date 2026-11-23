@@ -271,47 +271,18 @@ def _transcribe(x: np.ndarray, progress) -> list[dict]:
     Passing the array (rather than a path) keeps faster-whisper away from PyAV's
     ``av.open(..., metadata_errors=...)``, which older PyAV builds reject.
     """
-    # The first run downloads the model from HuggingFace. huggingface_hub only
-    # honours *_PROXY env vars, so a Windows "system proxy" never reaches it —
-    # feed it the same probe the lyric sources use, or the download dies
-    # before a single segment is ever transcribed.
-    try:
-        from .sources import _system_proxy
-        px = _system_proxy()
-        if px:
-            os.environ.setdefault("HTTPS_PROXY", px)
-            os.environ.setdefault("HTTP_PROXY", px)
-    except Exception:  # noqa: BLE001
-        pass
     _enable_cuda_dlls()
     from faster_whisper import WhisperModel
 
-    want = os.environ.get("UTALEARN_WHISPER", "large-v3")
-    attempts = []
-    cuda_ok = False
-    try:
-        import torch
-        if torch.cuda.is_available():
-            cuda_ok = True
-    except Exception:  # noqa: BLE001
-        pass
-    if cuda_ok:
-        # GPU: the big model transcribes well enough that its anchors are worth
-        # the 3GB download on first use.
-        attempts.append((want, "cuda", "float16"))
-        attempts.append(("small", "cuda", "float16"))
-    else:
-        # CPU-only: start with `small` (~500MB, first-run download is 6x cheaper
-        # than large-v3 and fast enough to be usable); large stays as the
-        # accuracy upgrade for anyone who sets UTALEARN_WHISPER explicitly.
-        attempts.append(("small", "cpu", "int8"))
-        attempts.append((want, "cpu", "int8"))
+    attempts = _model_attempts()
+    if not attempts:
+        raise RuntimeError(_model_missing_msg())
 
     last = None
     for name, device, ctype in attempts:
         try:
-            progress(0.10, f"载入 whisper {name}（{device}）…")
-            model = WhisperModel(name, device=device, compute_type=ctype)
+            progress(0.10, f"载入 whisper {_label(name)}（{device}）…")
+            model = WhisperModel(str(name), device=device, compute_type=ctype)
             progress(0.18, "识别歌声…")
             # VAD off: Silero rejects sung/spoken-over-music audio and returns
             # nothing, while raw decoding still finds the phrases.
@@ -333,17 +304,63 @@ def _transcribe(x: np.ndarray, progress) -> list[dict]:
         except Exception as e:  # noqa: BLE001
             last = e
             continue
-    # Tell download failures apart from real decode failures — the first needs a
-    # network hint, the second needs an audio hint, and the user's report only
-    # ever shows `last`.
-    txt = str(last).lower()
-    if any(k in txt for k in ("connect", "resolve", "timeout", "proxy",
-                              "huggingface", "snapshot", "localentrynotfound")):
-        raise RuntimeError(
-            f"whisper 模型下载失败（首次使用要联网下载模型）：{last}。"
-            "请检查网络或代理后重试；不需要单独安装 whisper 软件。"
-        )
+    # a bundled model was found but failed to load — that is a broken pack or a
+    # real decode fault, not a missing model
     raise RuntimeError(f"whisper 转写失败：{last}")
+
+
+# --------------------------------------------------------------------------- #
+# bundled whisper model: models/<name>/ next to the app
+# --------------------------------------------------------------------------- #
+# The model is *never* downloaded: the portable build ships `small` as an
+# optional extension pack (`models/whisper-small/`, a plain ctranslate2 folder
+# the loader reads straight off disk), and the config page offers a one-click
+# fetch of that same zip from the release page. No HF cache, no network — a
+# missing pack is a hard, actionable error rather than a surprise 500MB pull.
+
+def _model_root() -> Path:
+    """Folder that holds bundled models: <app>/models (writable or not)."""
+    return Path(__file__).resolve().parents[2] / "models"
+
+
+def _model_missing_msg() -> str:
+    return (
+        "未找到语音识别模型。这个功能需要「自定义歌词模型扩展包」：在配置页点"
+        "「下载并安装扩展」一键装好，或到发行版页面下载 whisper-small 扩展包，"
+        "解压到应用目录的 models/ 下（得到 models/whisper-small/）后重启。"
+    )
+
+
+def _local_model_dirs() -> list[Path]:
+    root = _model_root()
+    if not root.is_dir():
+        return []
+    return [p for p in sorted(root.iterdir()) if p.is_dir()]
+
+
+def _label(name) -> str:
+    return Path(str(name)).name if os.sep in str(name) else str(name)
+
+
+def _model_attempts() -> list[tuple[str | Path, str, str]]:
+    """Ordered (model, device, compute_type) tries.
+
+    Only bundled `models/<name>/` dirs are tried — the model is local by
+    contract, never pulled over the network.
+    """
+    local = _local_model_dirs()
+    if not local:
+        return []
+    cuda_ok = False
+    try:
+        import torch
+        if torch.cuda.is_available():
+            cuda_ok = True
+    except Exception:  # noqa: BLE001
+        pass
+    device = "cuda" if cuda_ok else "cpu"
+    ctype = "float16" if cuda_ok else "int8"
+    return [(n, device, ctype) for n in local]
 
 
 # --------------------------------------------------------------------------- #

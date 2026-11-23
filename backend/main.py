@@ -29,6 +29,8 @@ from app import export, fallback, jobs, retime
 from app.builder import _is_credit
 from app.builder import build as build_song
 from app.builder import slugify
+from app.builder import retime_words
+from app.dicts import analyze, enrich, find_grammar, parse_reading_marks
 from app.sources import SOURCES, Song, get_source, search_all
 
 # --------------------------------------------------------------------------- #
@@ -518,6 +520,88 @@ def api_job(jid: str):
     return job
 
 
+# --------------------------------------------------------------------------- #
+# whisper model extension pack
+# --------------------------------------------------------------------------- #
+# The custom-lyrics path needs a bundled speech model under `models/`. It is
+# never pulled from HuggingFace: the config page offers a one-click install
+# that fetches the version-independent `whisper-small` zip off the *latest*
+# GitHub release of this repo and unpacks it next to the app.
+
+GITHUB_REPO = "HaneWari/uta-learn-next"
+WHISPER_ASSET = "UtaLearnNext-whisper-small.zip"
+
+
+def _whisper_model_dir() -> Path:
+    return APP_ROOT / "models" / "whisper-small"
+
+
+def _whisper_installed() -> bool:
+    d = _whisper_model_dir()
+    return d.is_dir() and (d / "model.bin").exists()
+
+
+@app.get("/api/models/status")
+def api_model_status():
+    return {"installed": _whisper_installed(),
+            "path": str(_whisper_model_dir()),
+            "asset": WHISPER_ASSET}
+
+
+def _latest_whisper_url() -> str:
+    """Stable download URL of the whisper zip on the newest release.
+
+    ``releases/latest/download/<asset>`` redirects to the newest release's
+    asset without touching the API, so it is immune to the anonymous GitHub
+    API rate limit that would otherwise 403 the install on a busy day.
+    """
+    return (f"https://github.com/{GITHUB_REPO}/releases/latest/download/"
+            f"{WHISPER_ASSET}")
+
+
+@app.post("/api/models/install")
+def api_model_install():
+    """Download + unpack the whisper extension pack in the background."""
+    if _whisper_installed():
+        return {"job_id": None, "installed": True}
+    jid = jobs.create("model-install")
+
+    def work(progress):
+        import io
+        import zipfile
+        import httpx
+
+        progress(0.05, "查询最新发行版…")
+        url = _latest_whisper_url()
+        progress(0.10, "下载模型扩展包（约 460MB，请稍候）…")
+        buf = io.BytesIO()
+        with httpx.Client(timeout=None, follow_redirects=True) as c:
+            with c.stream("GET", url) as r:
+                r.raise_for_status()
+                total = int(r.headers.get("content-length") or 0)
+                got = 0
+                for chunk in r.iter_bytes(1 << 20):
+                    buf.write(chunk)
+                    got += len(chunk)
+                    if total:
+                        # download spans 10%–80% of the job
+                        progress(0.10 + 0.70 * got / total,
+                                 f"下载模型扩展包… {got // 1048576}MB")
+        progress(0.85, "解压到 models/…")
+        dest = APP_ROOT / "models"
+        dest.mkdir(parents=True, exist_ok=True)
+        buf.seek(0)
+        with zipfile.ZipFile(buf) as z:
+            z.extractall(dest)
+        if not _whisper_installed():
+            raise RuntimeError("解压后未找到 models/whisper-small/model.bin")
+        progress(0.98, "安装完成")
+        return {"installed": True, "path": str(_whisper_model_dir())}
+
+    jobs.run(jid, work)
+    return {"job_id": jid}
+
+
 @app.get("/api/songs")
 def api_songs():
     return list_datasets()
@@ -582,11 +666,42 @@ def api_patch_song(name: str, patch: dict):
                     seg.pop(key, None)
                 else:
                     seg[key] = patch[key]
+        # A lyric edit changes the sung text, so the old per-word timings no
+        # longer describe it. Rebuild the line's `words` (and grammar, since
+        # that is computed off the same tokens) so the override still shows
+        # furigana, romaji and a per-glyph wipe — just re-estimated, not the
+        # stale source alignment. An emptied line drops both.
+        if "lyric_override" in patch:
+            ov = seg.get("lyric_override")
+            if ov and ov.get("text") is not None:
+                plain, marks = parse_reading_marks(ov["text"])
+                words = retime_words(plain, seg["start"], seg["end"], marks)
+                ov["words"] = words
+                # keep the mark-up in the stored text so the editor re-shows
+                # `[明日](あす)`, but a plain override stays verbatim
+                ov["text"] = ov["text"] if marks else plain
+                grammar = _reline_grammar(plain)
+                if grammar is not None:
+                    seg["grammar"] = grammar
+                else:
+                    seg.pop("grammar", None)
         path.write_text(json.dumps(data, ensure_ascii=False, indent=2),
                         encoding="utf-8")
         return seg
 
     raise HTTPException(status_code=404, detail="segment not found")
+
+
+def _reline_grammar(text: str) -> list[dict] | None:
+    """Grammar hits for a re-tokenised override line; None when there are none."""
+    if not text.strip():
+        return None
+    tokens = analyze(text)
+    if not tokens:
+        return None
+    enrich(tokens)
+    hits = find_grammar(text, tokens)
+    return hits or None
 
 
 # --------------------------------------------------------------------------- #

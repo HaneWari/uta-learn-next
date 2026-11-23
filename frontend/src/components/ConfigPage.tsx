@@ -63,6 +63,40 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState<string | null>(null);
 
+  /* ---- whisper model for the custom-lyrics mode ---- */
+  const [modelInstalled, setModelInstalled] = useState<boolean | null>(null);
+  const [modelJob, setModelJob] = useState<Job | null>(null);
+  const [modelBusy, setModelBusy] = useState(false);
+
+  // probe once so the custom panel can show "装好了" without a round-trip
+  useEffect(() => {
+    api.modelStatus().then((s) => setModelInstalled(s.installed)).catch(() => setModelInstalled(null));
+  }, []);
+
+  const installModel = useCallback(async () => {
+    setModelBusy(true);
+    setNotice(null);
+    setModelJob(null);
+    try {
+      const { job_id } = await api.installModel();
+      if (!job_id) {
+        setModelInstalled(true);
+        return;
+      }
+      const done = await waitForJob(job_id, setModelJob, 800);
+      if (done.status === "error") {
+        setNotice(`扩展安装失败：${done.error ?? "未知错误"}`);
+      } else {
+        setModelInstalled(true);
+        setNotice("语音识别扩展已装好，可以离线自定义歌词了");
+      }
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e));
+    } finally {
+      setModelBusy(false);
+    }
+  }, []);
+
   const doUpload = useCallback(async (file: File) => {
     setUploading(true);
     setNotice(null);
@@ -375,6 +409,52 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
             </>
           ) : (
             <>
+              {/* the speech model is a separate download, not part of lite —
+                  surface its state right where it is needed so a missing pack
+                  is a one-click fix instead of a failed build */}
+              <div className={`model-banner${modelInstalled ? " ok" : ""}`}>
+                {modelInstalled ? (
+                  <span className="model-ok">✓ 语音识别扩展已就绪，可离线对齐歌词</span>
+                ) : (
+                  <>
+                    <div className="model-banner-text">
+                      <strong>自定义歌词需要语音识别扩展</strong>
+                      <span>一次性下载约 460MB，装好即可离线使用（不随版本更新）</span>
+                    </div>
+                    <div className="model-banner-actions">
+                      <button
+                        className="btn primary"
+                        onClick={() => void installModel()}
+                        disabled={modelBusy}
+                      >
+                        {modelBusy ? "下载安装中…" : "下载并安装扩展"}
+                      </button>
+                      <details className="model-manual">
+                        <summary>手动安装</summary>
+                        <p>
+                          到发行版页面下载 <code>UtaLearnNext-whisper-small.zip</code>，
+                          解压到应用目录得到 <code>models/whisper-small/model.bin</code>，
+                          重启程序即可。
+                        </p>
+                      </details>
+                    </div>
+                  </>
+                )}
+                {modelJob && modelBusy && (
+                  <div className="model-progress">
+                    <div className="job-bar">
+                      <div
+                        className="job-fill"
+                        style={{ width: `${Math.round(modelJob.progress * 100)}%` }}
+                      />
+                    </div>
+                    <span className="job-msg">
+                      {modelJob.message} · {Math.round(modelJob.progress * 100)}%
+                    </span>
+                  </div>
+                )}
+              </div>
+
               <label className="lyric-field">
                 歌词（每行一句，不需要时间轴）
                 <textarea
@@ -383,6 +463,11 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                   placeholder={"つかめ描いた夢を\nまもれ大事な友を\nたくましい自分になれるさ"}
                   spellCheck={false}
                 />
+                <span className="lyric-reading-hint">
+                  想改掉某个汉字/词组的读音？写作 <code>[汉字](读音)</code>，例如{" "}
+                  <code>[明日](あす)</code> 或 <code>[運命](さだめ)</code>；
+                  假名 / 片假名 / 罗马音都行，方括号圆括号用中文全角也认。
+                </span>
               </label>
               <div className="panel-foot">
                 <span className="picked-note">

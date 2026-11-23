@@ -307,3 +307,142 @@ def is_content(token: dict) -> bool:
         # ように / そうだ are patterns, not the nouns 様 / 相
         return False
     return len(token["surface"]) >= 1 and bool(token.get("zh"))
+
+
+# --------------------------------------------------------------------------- #
+# hand-annotated readings: [汉字](よみ)
+# --------------------------------------------------------------------------- #
+# Lyrics carry plenty of irregular readings: a song that writes 明日 but sings
+# あす, ateji, or a stylistic kana. The tagger cannot know those, so the user
+# marks them inline: `[明日](あす)`. Both bracket pairs accept the full-width
+# CJK forms (【 】 and （ ）) since that is what a Japanese/Chinese IME types.
+# The *reading* side accepts kana or romaji; kana is stored on the token and
+# romaji is derived from it — a romaji mark is romanised once into kana and
+# then follows the same path.
+#
+# The base *must* sit inside the brackets: `[汉字](よみ)`. A bare `汉字(よみ)`
+# or a bracket with no `(...)` is deliberately NOT a mark — lyrics legitimately
+# contain those shapes (a refrain in parens, a bracketed echo), so an unpaired
+# bracket or paren is treated as ordinary text and sung as written.
+_ANNO_RE = re.compile(
+    r"[\[【]([^\]】\[\[（）()]+?)[\]】]\s*[（(]([^（）()（()]+?)[)）]")
+
+_KANA_ONLY = re.compile(r"^[ぁ-ゖァ-ヶー・･]+$")
+_ROMAJI_ONLY = re.compile(r"^[A-Za-z' -]+$")
+
+# Reverse of KANA_ROMAJI/YOUS for the romaji-reading form: `[明日](asu)` is a
+# valid annotation too. Longest match wins so `kya` lands as きゃ not きゃな.
+_ROMAJI_TO_KANA: dict[str, str] = {}
+for _src in (KANA_ROMAJI, YOUS):
+    for _k, _v in _src.items():
+        # first writer wins on the few ambiguous keys (e.g. ぢ/じ both map to ji);
+        # the common reading (じ) is declared first in KANA_ROMAJI order
+        _ROMAJI_TO_KANA.setdefault(_v, _k)
+_ROMAJI_KEYS = sorted(_ROMAJI_TO_KANA, key=len, reverse=True)
+
+
+def _romaji_to_kana(text: str) -> str:
+    """Best-effort romaji → hiragana; used only for `(reading)` marks typed as
+    romaji. Greedy longest-match; a `n` that cannot start a syllable is ん."""
+    s = text.strip().lower().replace("-", "")
+    out, i = [], 0
+    while i < len(s):
+        if s[i] == "n" and (i + 1 == len(s) or s[i + 1] not in "aiueoyn"):
+            out.append("ん")
+            i += 1
+            continue
+        if s[i] == "n" and s[i + 1:i + 2] in "aiueo":
+            # syllable-initial n stays n (na/ni/…), handled by longest match
+            pass
+        hit = None
+        for key in _ROMAJI_KEYS:
+            if key and s.startswith(key, i):
+                hit = key
+                break
+        if hit:
+            out.append(_ROMAJI_TO_KANA[hit])
+            i += len(hit)
+            continue
+        if s[i] == "'":
+            out.append("ん")
+            i += 1
+            continue
+        out.append(s[i])
+        i += 1
+    return "".join(out)
+
+
+def _reading_to_kana(reading: str) -> str:
+    """Normalise an annotated reading to hiragana for `token["kana"]`."""
+    r = reading.strip()
+    if not r:
+        return ""
+    if _KANA_ONLY.match(r):
+        return kata_to_hira(r)
+    if _ROMAJI_ONLY.match(r):
+        return _romaji_to_kana(r)
+    return kata_to_hira(r)
+
+
+def parse_reading_marks(text: str) -> tuple[str, list[dict]]:
+    """Strip `[汉字](よみ)` marks out of `text`; returns (plain, marks).
+
+    `plain` keeps the bracketed base text inline (so 明日 still occupies its
+    character span) and drops only the mark-up — the tags themselves were never
+    sung, so they must not reach the tagger or the timeline.
+
+    Each mark is ``{base, kana, at}`` where `at` is the plain-text offset of the
+    *base* run, so it can be matched back onto tokens spanning that span.
+    """
+    marks: list[dict] = []
+    out: list[str] = []
+    last = 0
+    shift = 0
+    for m in _ANNO_RE.finditer(text):
+        out.append(text[last:m.start()])
+        base = m.group(1)
+        kana = _reading_to_kana(m.group(2))
+        at = m.start() - shift
+        marks.append({"base": base, "kana": kana, "at": at})
+        out.append(base)
+        # the annotation "(よみ)" and the brackets disappear; `base` stays
+        shift += (m.end() - m.start()) - len(base)
+        last = m.end()
+    out.append(text[last:])
+    return "".join(out), marks
+
+
+def apply_reading_marks(text: str, tokens: list[dict],
+                        marks: list[dict]) -> None:
+    """Overwrite `kana`/`romaji` on tokens the marks cover.
+
+    A mark's base can span several tokens (詞組) or sit inside one — the
+    tokens whose *character span* touches the base get the new reading in
+    mora order. Only kana/romaji change; the word timings are untouched, so a
+    mark never costs the per-glyph wipe.
+    """
+    if not marks:
+        return
+    for mark in marks:
+        a = mark["at"]
+        b = a + len(mark["base"])
+        kana = mark["kana"]
+        hit = [t for t in tokens if t["start"] < b and a < t["end"]]
+        if not hit or not kana:
+            continue
+        if len(hit) == 1:
+            hit[0]["kana"] = kana
+            hit[0]["romaji"] = to_romaji(kana)
+            continue
+        # spread the reading over the covered tokens proportionally to their
+        # original mora, so 明日 → あす still reads one word of it at a time
+        weights = [max(1, mora_count(t)) for t in hit]
+        total = sum(weights)
+        units = [c for c in kana if not is_punct(c)]
+        pos = 0
+        for t, w in zip(hit, weights):
+            n = max(1, round(len(units) * w / total)) if pos < len(units) else 0
+            part = units[pos:pos + n] if pos < len(units) else []
+            pos += n
+            t["kana"] = "".join(part)
+            t["romaji"] = to_romaji(t["kana"])

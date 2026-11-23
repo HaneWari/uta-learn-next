@@ -8,8 +8,18 @@ Two archives of the same release, so users pick what they need:
 Both are plain "unzip and double-click" — no Python, no Node, no ffmpeg, no
 admin rights. Data lives inside the folder (or %LOCALAPPDATA% when read-only).
 
+A third, *version-independent* archive carries the optional whisper model used
+by the custom-lyrics path. It is built once from a machine that already has the
+model in its HF cache and shipped on every release:
+
+  UtaLearnNext-whisper-small.zip  speech model for 自定义歌词  (~460 MB)
+
+Unzipping it into the app folder yields `models/whisper-small/`; the backend
+loads it straight from disk, so the feature works fully offline.
+
 Usage:
   python tools/build_portable.py                 # build both zips
+  python tools/build_portable.py --whisper-pack  # only the whisper extension zip
   python tools/build_portable.py --no-zip        # just the folder
   python tools/build_portable.py --out D:/x      # build elsewhere (space!)
   python tools/build_portable.py --ffmpeg-dir C:/ffmpeg/bin
@@ -165,6 +175,9 @@ LAUNCHER_LINES = [
     'set "PYTHONHOME=%~dp0python"',
     'set "PYTHONPATH=%~dp0python;%~dp0python\\Lib\\site-packages"',
     'if exist "%~dp0browsers" set "PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers"',
+    "REM 语音识别模型放在 models/ 下（自定义歌词扩展包解压进来即是）；设了",
+    "REM HF_HOME 后 huggingface_hub 也优先用它，扩展包与缓存共用一处。",
+    'if not defined HF_HOME set "HF_HOME=%~dp0models"',
     "REM 选一个空闲端口：8000 被占时会静默连到别的实例，导出/数据就落到别处去了。",
     'set "PORT=8000"',
     'for /l %%P in (8000,1,8010) do (',
@@ -232,6 +245,89 @@ def make_zip(base: Path, out: Path, extra: dict[str, Path] | None = None) -> Pat
     return out
 
 
+# --------------------------------------------------------------------------- #
+# whisper model extension pack (version-independent)
+# --------------------------------------------------------------------------- #
+# The model is taken from this machine's HuggingFace cache and laid out as a
+# plain ctranslate2 folder, so the app can `WhisperModel(<dir>)` without any
+# huggingface_hub state. `HF_HOME`/`HF_HUB_CACHE`/`HUGGINGFACE_HUB_CACHE` are
+# honoured so a custom cache location still resolves.
+
+WHISPER_REPO = "Systran/faster-whisper-small"
+WHISPER_DIRNAME = "whisper-small"
+
+
+def _hf_cache() -> Path:
+    for var in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+        raw = os.environ.get(var)
+        if raw:
+            return Path(raw)
+    home = os.environ.get("HF_HOME")
+    if home:
+        return Path(home) / "hub"
+    return Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def _whisper_snapshot() -> Path:
+    """Locate the snapshot dir of the small model in the local HF cache."""
+    repo_dir = _hf_cache() / ("models--" + WHISPER_REPO.replace("/", "--"))
+    snap = repo_dir / "snapshots"
+    if not snap.is_dir():
+        raise SystemExit(
+            f"在本机 HF 缓存找不到 {WHISPER_REPO}。先让程序下载一次 small 模型"
+            f"（运行一次自定义歌词对齐），或设置 HF_HOME 指向缓存。\n  {repo_dir}")
+    best = None
+    for d in sorted(snap.iterdir()):
+        if (d / "model.bin").exists():
+            best = d  # keep the newest valid snapshot
+    if best is None:
+        raise SystemExit(f"{snap} 里没有完整的模型快照（缺 model.bin）")
+    return best
+
+
+def stage_whisper_model(dest: Path) -> Path:
+    """Copy the snapshot into `dest/whisper-small` as a flat model dir."""
+    src = _whisper_snapshot()
+    target = dest / WHISPER_DIRNAME
+    if target.is_dir() and (target / "model.bin").exists():
+        say("whisper-small 模型已就位，跳过")
+        return target
+    say(f"复制 whisper-small 模型（{src.name[:12]}…）…")
+    target.mkdir(parents=True, exist_ok=True)
+    for f in src.iterdir():
+        # blobs arrive as symlinks into the blob store; resolve them so the zip
+        # holds real bytes, not links
+        if f.is_file() or f.is_symlink():
+            shutil.copy2(f.resolve(), target / f.name)
+    size = sum(f.stat().st_size for f in target.rglob("*") if f.is_file()) / 1048576
+    say(f"  models/{WHISPER_DIRNAME} = {size:.0f} MB")
+    return target
+
+
+def make_whisper_zip(out: Path) -> Path:
+    """Standalone zip: `models/whisper-small/…`, version-free on purpose."""
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()
+    say(f"打包 {out.name} …")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        # model.bin is already quantised; re-deflating it buys ~nothing, but a
+        # stored zip still decompresses fine and saves minutes of CPU
+        snap = _whisper_snapshot()
+        for f in sorted(snap.iterdir()):
+            if f.is_file() or f.is_symlink():
+                z.write(f.resolve(), f"models/{WHISPER_DIRNAME}/{f.name}")
+        # a tiny readme so an unzip-first user knows where the folder goes
+        z.writestr(
+            "models/README-where-this-goes.txt",
+            "把整个 models 文件夹解压到 UtaLearnNext 应用目录，得到\n"
+            "  UtaLearnNext/models/whisper-small/model.bin\n"
+            "之后重新启动程序，自定义歌词即可离线语音识别。\n",
+        )
+    say(f"  {out.stat().st_size / 1048576:.0f} MB")
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(ROOT / "dist-portable"), help="构建目录")
@@ -240,7 +336,16 @@ def main() -> int:
     ap.add_argument("--no-full", action="store_true", help="只做 lite 包")
     ap.add_argument("--zip-out", default=None, help="ZIP 输出目录（默认与构建目录同级）")
     ap.add_argument("--browsers-dir", default=None, help="Chromium 安装位置（默认构建目录旁）")
+    ap.add_argument("--whisper-pack", action="store_true",
+                    help="只生成 whisper-small 扩展包（版本无关，一次构建长期复用）")
+    ap.add_argument("--whisper-dir", default=None,
+                    help="whisper-small 模型目录（默认从本机 HF 缓存取）")
     args = ap.parse_args()
+
+    if args.whisper_pack:
+        zip_root = Path(args.zip_out).resolve() if args.zip_out else Path(args.out).resolve()
+        make_whisper_zip(zip_root / "UtaLearnNext-whisper-small.zip")
+        return 0
 
     if not (ROOT / "frontend" / "dist" / "index.html").exists():
         say("frontend/dist 不存在，请先 npm run build")

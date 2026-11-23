@@ -65,6 +65,16 @@ export const api = {
 
   job: (id: string) => fetch(`${BASE}/api/jobs/${id}`).then((r) => json<Job>(r)),
 
+  /* whisper model extension pack for the custom-lyrics mode */
+  modelStatus: () =>
+    fetch(`${BASE}/api/models/status`).then((r) =>
+      json<{ installed: boolean; path: string; asset: string }>(r),
+    ),
+  installModel: () =>
+    fetch(`${BASE}/api/models/install`, { method: "POST" }).then((r) =>
+      json<{ job_id: string | null; installed?: boolean }>(r),
+    ),
+
   songs: () => fetch(`${BASE}/api/songs`).then((r) => json<SongSummary[]>(r)),
 
   exportStatus: () =>

@@ -19,6 +19,7 @@ import re
 from datetime import datetime, timezone
 
 from .dicts import analyze, enrich, find_grammar, is_content, is_punct, mora_count
+from .dicts import apply_reading_marks, parse_reading_marks
 from .sources import ParsedLyrics
 
 PUNCT = set(" \u3000\t、。,.!?！？…「」『』()（）・~〜-—–:;\"'’“”　")
@@ -201,9 +202,13 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
             if max_time is not None and chars[0]["start"] >= max_time:
                 continue
 
-        tokens = analyze(text)
+        # reading marks come out before the tagger runs: `明日[あす]` must be
+        # tokenised as 明日, with the mark re-applied to its kana afterwards
+        plain_text, marks = parse_reading_marks(text)
+        tokens = analyze(plain_text)
         if not tokens:
             continue
+        apply_reading_marks(plain_text, tokens, marks)
         _prefer_kana_lemma(tokens)
         if parsed.kind != "char":
             chars = _times_by_mora(text, remap(line["start"]),
@@ -216,26 +221,7 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
             if not seg_chars:
                 continue
             surface = t["surface"]
-            w = {
-                "text": surface,
-                "lemma": t["lemma"],
-                "pos": t["pos"],
-                "pos1": t["pos1"],
-                "start": seg_chars[0]["start"],
-                "end": seg_chars[-1]["end"],
-                "score": 1.0,
-                "chars": seg_chars,
-                "content": is_content(t),
-            }
-            if t.get("kana"):
-                w["kana"] = t["kana"]
-            w["romaji"] = "" if all(is_punct(c) for c in surface) else t["romaji"]
-            if t.get("zh"):
-                w["zh"] = t["zh"]
-            if t.get("jlpt"):
-                w["jlpt"] = t["jlpt"]
-            if t.get("lemma_kana"):
-                w["lemma_kana"] = t["lemma_kana"]
+            w = _word_entry(t, seg_chars)
             words.append(w)
 
         if not words:
@@ -258,6 +244,7 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
         segments.append(seg)
 
     duration = segments[-1]["end"] if segments else 0.0
+
     return {
         "meta": {
             "language": "ja",
@@ -267,6 +254,71 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
         },
         "segments": segments,
     }
+
+
+def _word_entry(t: dict, seg_chars: list[dict]) -> dict:
+    surface = t["surface"]
+    w = {
+        "text": surface,
+        "lemma": t["lemma"],
+        "pos": t["pos"],
+        "pos1": t["pos1"],
+        "start": seg_chars[0]["start"],
+        "end": seg_chars[-1]["end"],
+        "score": 1.0,
+        "chars": seg_chars,
+        "content": is_content(t),
+    }
+    if t.get("kana"):
+        w["kana"] = t["kana"]
+    w["romaji"] = "" if all(is_punct(c) for c in surface) else t["romaji"]
+    if t.get("zh"):
+        w["zh"] = t["zh"]
+    if t.get("jlpt"):
+        w["jlpt"] = t["jlpt"]
+    if t.get("lemma_kana"):
+        w["lemma_kana"] = t["lemma_kana"]
+    return w
+
+
+def retime_words(text: str, start: float, end: float,
+                 marks: list[dict] | None = None) -> list[dict]:
+    """Re-analyse a hand-edited line into fresh `words` for the stage.
+
+    Used when a lyric override replaces the sung text: the old word timings no
+    longer describe the new surface, so the line is re-tokenised and its span
+    `[start, end]` is re-shared over the new tokens *evenly by mora* — the line
+    glides start→end as one smooth wipe rather than chasing the old per-char
+    anchors. That is the look the user asked for: close enough to stay coherent,
+    and honest about being estimated (someone who needs true per-word timing
+    re-generates the line in the custom-lyrics mode instead).
+
+    Reading marks `[汉字](よみ)` are honoured: they re-annotate the token's
+    kana after tokenisation, so `[明日](あす)` shows あす over 明日 without
+    losing the wipe.
+    """
+    # `text` may already be stripped (then `marks` carries the offsets found
+    # before stripping); accept either form so a caller that already parsed
+    # the marks does not lose them.
+    if marks is None:
+        plain, marks = parse_reading_marks(text)
+    else:
+        plain = text
+    if not plain.strip():
+        return []
+    tokens = analyze(plain)
+    if not tokens:
+        return []
+    apply_reading_marks(plain, tokens, marks)
+    _prefer_kana_lemma(tokens)
+    chars = _times_by_mora(plain, float(start), float(end), tokens)
+    enrich(tokens)
+    words = []
+    for t in tokens:
+        seg_chars = chars[t["start"]:t["end"]]
+        if seg_chars:
+            words.append(_word_entry(t, seg_chars))
+    return words
 
 
 def from_plain_lines(lines: list[str], meta: dict,

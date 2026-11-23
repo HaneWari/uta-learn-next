@@ -988,6 +988,104 @@ body {
   font-size: 16px;
 }
 
+/* ---------- whisper model banner (custom lyrics) ---------- */
+.model-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid rgba(255, 138, 61, 0.4);
+  background: rgba(255, 138, 61, 0.07);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 6px;
+}
+
+.model-banner.ok {
+  border-color: rgba(120, 160, 90, 0.4);
+  background: rgba(120, 160, 90, 0.08);
+}
+
+.model-ok {
+  color: #6f8a4d;
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.model-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.model-banner-text strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.model-banner-text span {
+  color: #a08a6d;
+  font-size: 12.5px;
+}
+
+.model-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.model-manual {
+  font-size: 12.5px;
+  color: #8a7460;
+}
+
+.model-manual summary {
+  cursor: pointer;
+  color: var(--coral);
+  font-weight: 600;
+}
+
+.model-manual p {
+  margin: 6px 0 0;
+  line-height: 1.7;
+}
+
+.model-manual code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  color: var(--coral);
+  background: rgba(255, 138, 61, 0.12);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
+.model-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+/* inline how-to for the `[汉字](よみ)` reading marks, under the lyric box */
+.lyric-reading-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #a08a6d;
+  letter-spacing: 0.02em;
+  font-weight: 400;
+  text-transform: none;
+}
+
+.lyric-reading-hint code,
+.lyr-edit-hint code {
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  color: var(--coral);
+  background: rgba(255, 138, 61, 0.12);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+
 /* ---------- job + song list ---------- */
 
 .job {

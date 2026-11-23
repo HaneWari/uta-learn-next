@@ -55,9 +55,26 @@ export function useSongData(song: string | null) {
         };
         return next;
       });
-      api.patchSong(song, { id: segId, ...body }).catch(() => {
-        /* keep the optimistic state; next full reload re-reads the file */
-      });
+      api
+        .patchSong(song, { id: segId, ...body })
+        .then((server) => {
+          // The server can *enrich* a patch — a lyric edit re-tokenises the
+          // text into `lyric_override.words`/`grammar` — so the authoritative
+          // segment replaces the optimistic one, not the other way round.
+          setSongData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  segments: prev.segments.map((s) =>
+                    s.id === segId ? ({ ...s, ...server } as Segment) : s,
+                  ),
+                }
+              : prev,
+          );
+        })
+        .catch(() => {
+          /* keep the optimistic state; next full reload re-reads the file */
+        });
       return updated;
     },
     [song],
