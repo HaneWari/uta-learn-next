@@ -19,6 +19,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_BASE = ROOT / "dist-portable" / "UtaLearnNext"
 
+# Windows CI runners default to a cp1252 console, which cannot encode the
+# Chinese progress lines and would abort the smoke run before it starts.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def free_port() -> int:
     with socket.socket() as s:
