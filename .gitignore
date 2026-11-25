@@ -10,6 +10,8 @@ venv/
 # ---- Node ----
 node_modules/
 dist/
+# a renamed build dir (e.g. while testing a build-script edge case)
+dist-*/
 *.tsbuildinfo
 
 # ---- 本地数据与产物（绝不提交）----
