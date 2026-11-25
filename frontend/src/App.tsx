@@ -349,8 +349,13 @@ export default function App() {
       )}
       {exportOpen && songData && (
         <ExportDialog
+          // the export runs to the *audio* length, not the lyric timeline:
+          // a trimmed intro or a different edit makes them differ by tens of
+          // seconds, and the dialog must show what will actually be rendered
           duration={
-            songData.meta.duration_seconds ||
+            (current?.duration && current.duration > 0
+              ? current.duration
+              : songData.meta.duration_seconds) ||
             (songData.segments[songData.segments.length - 1]?.end ?? 0)
           }
           settings={settings}

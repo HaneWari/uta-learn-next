@@ -3,11 +3,24 @@ import { SHORTCUTS } from "../lib/shortcuts";
 
 const GROUPS = ["播放", "学习", "显示", "编辑"] as const;
 
+const KEY_LABELS: Record<string, string> = {
+  " ": "Space",
+  ArrowLeft: "←",
+  ArrowRight: "→",
+  ArrowUp: "↑",
+  ArrowDown: "↓",
+  Escape: "Esc",
+};
+
 function combo(keys: string[], shift?: boolean, ctrl?: boolean) {
   const parts: string[] = [];
   if (ctrl) parts.push("Ctrl");
   if (shift) parts.push("Shift");
-  parts.push(...keys.map((k) => (k === " " ? "Space" : k)));
+  // `keys` lists every accepted spelling (`r` and `R`); the sheet shows one,
+  // uppercased, or the table reads like a chord nobody can press
+  const raw = keys[0];
+  const key = KEY_LABELS[raw] ?? raw.toUpperCase();
+  parts.push(key);
   return parts.join(" + ");
 }
 
