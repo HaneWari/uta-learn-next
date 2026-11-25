@@ -1,37 +1,29 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useCallback } from "react";
 import type { GrammarHit, Segment, WordTiming } from "../types";
+import {
+  computeCardBudget,
+  computeCards,
+  EXTRA_BASE,
+  normGrammar,
+  normOverride,
+  reorderPreview,
+} from "../lib/cards";
+import type { CardData } from "../lib/cards";
+import { displayRomaji } from "../lib/romaji";
+import { useSettings } from "../lib/settings";
 
 /** How many vocabulary cards the current window can carry. */
 function useCardBudget() {
-  const [budget, setBudget] = useState(() => compute(window.innerWidth));
+  const [budget, setBudget] = useState(() => computeCardBudget(window.innerWidth));
 
   useEffect(() => {
-    const onResize = () => setBudget(compute(window.innerWidth));
+    const onResize = () => setBudget(computeCardBudget(window.innerWidth));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
   return budget;
-}
-
-function compute(width: number) {
-  if (width < 900) return 2;
-  if (width < 1300) return 3;
-  return 4;
-}
-
-/** JLPT weight: the card row should teach upward, so N1 outranks N5 by a lot. */
-const LEVEL_SCORE: Record<string, number> = {
-  N1: 5,
-  N2: 4,
-  N3: 3,
-  N4: 2,
-  N5: 1,
-};
-
-function levelScore(level?: string) {
-  return LEVEL_SCORE[(level ?? "").toUpperCase()] ?? 0;
 }
 
 /* ---------- editable card model ----------
@@ -58,52 +50,6 @@ interface GrammarEdit {
   level: string;
   z: string;
   ex: string;
-}
-
-interface VocabCardData {
-  key: string;
-  kind: "word";
-  /** stable identity within the segment: word index, or extra index + 10000 */
-  id: number;
-  w: WordTiming;
-}
-
-interface GrammarCardData {
-  key: string;
-  kind: "grammar";
-  /** grammar id from the source, or `__extra_${i}` */
-  id: string;
-  g: GrammarHit;
-}
-
-type CardData = VocabCardData | GrammarCardData;
-
-const EXTRA_BASE = 10000;
-
-/** Move `dragKey` to where `overKey` sits in the visible row. */
-function reorderPreview(keys: string[], dragKey: string, overKey: string) {
-  const rest = keys.filter((k) => k !== dragKey);
-  const at = rest.indexOf(overKey);
-  if (at < 0) return rest.concat(dragKey);
-  rest.splice(at, 0, dragKey);
-  return rest;
-}
-
-function normOverride(ov?: Segment["vocab_override"]) {
-  return {
-    hide: ov?.hide ?? [],
-    replace: ov?.replace ?? {},
-    extra: ov?.extra ?? [],
-    order: ov?.order ?? [],
-  };
-}
-
-function normGrammar(ov?: Segment["grammar_extra"]) {
-  return {
-    remove: ov?.remove ?? [],
-    replace: ov?.replace ?? {},
-    extra: ov?.extra ?? [],
-  };
 }
 
 function wordToEdit(w: WordTiming): VocabEdit {
@@ -143,127 +89,6 @@ function grammarToEdit(g: GrammarHit): GrammarEdit {
   return { name: g.name, level: g.level ?? "", z: g.z, ex: g.ex ?? "" };
 }
 
-/** Merge generated picks + overrides into the final visible cards. */
-function computeCards(
-  segment: Segment | null,
-  budget: number,
-): CardData[] {
-  if (!segment) return [];
-  const ov = normOverride(segment.vocab_override);
-  const gov = normGrammar(segment.grammar_extra);
-
-  // ask for one extra word so hiding a card can be backfilled, like before
-  const generated = pickWords(segment, budget + 1);
-  const shown = generated.filter(
-    (w) => !ov.hide.includes(segment.words.indexOf(w)),
-  );
-  const genCards: VocabCardData[] = shown.map((w) => {
-    const idx = segment.words.indexOf(w);
-    return {
-      key: `w${idx}`,
-      kind: "word",
-      id: idx,
-      w: { ...w, ...ov.replace[idx] },
-    };
-  });
-  const extraCards: VocabCardData[] = ov.extra.map((w, i) => ({
-    key: `wx${i}`,
-    kind: "word",
-    id: EXTRA_BASE + i,
-    w,
-  }));
-
-  const grammar: GrammarCardData[] = [
-    ...(segment.grammar ?? [])
-      .filter((g) => !gov.remove.includes(g.id))
-      .map(
-        (g): GrammarCardData => ({
-          key: `g-${g.id}`,
-          kind: "grammar",
-          id: g.id,
-          g: { ...g, ...gov.replace[g.id] },
-        }),
-      )
-      .slice(0, 1),
-    ...gov.extra.map(
-      (g, i): GrammarCardData => ({
-        key: `gx${i}`,
-        kind: "grammar",
-        id: `__extra_${i}`,
-        g,
-      }),
-    ),
-  ];
-
-  // One ordering for the whole row. Newer saves store every card's `key`
-  // (`w${index}` / `wx${i}` / `g-${id}` / `gx${i}`); older saves only listed
-  // generated word indexes, which are normalised to `w${index}` keys first.
-  const all: CardData[] = [...genCards, ...extraCards, ...grammar];
-  const byKey = new Map(all.map((c) => [c.key, c] as const));
-  const defaultKeys = all.map((c) => c.key);
-  const storedKeys = ov.order.map((o) =>
-    typeof o === "number" ? `w${o}` : o,
-  );
-  const orderedKeys = storedKeys.length
-    ? [
-        ...storedKeys.filter((k) => byKey.has(k)),
-        ...defaultKeys.filter((k) => !storedKeys.includes(k)),
-      ]
-    : defaultKeys;
-
-  // Fit the ordered row into the budget. A grammar card always keeps one
-  // reserved slot (it is the line's pattern, not just another word), so word
-  // cards fill `budget - gSlots` and never push the grammar card out — while
-  // still letting the user drag it anywhere in the row.
-  const ordered = orderedKeys
-    .map((k) => byKey.get(k))
-    .filter((c): c is CardData => !!c);
-  const gSlots = Math.min(1, ordered.filter((c) => c.kind === "grammar").length);
-  const wordBudget = budget - gSlots;
-  let wTaken = 0;
-  let gTaken = 0;
-  return ordered.filter((c) =>
-    c.kind === "word" ? wTaken++ < wordBudget : gTaken++ < gSlots,
-  );
-}
-
-/**
- * Choose which words get a card, and in what order.
- *
- * Selection prefers higher JLPT levels (that is what "优先高阶" means here), but
- * the cards are still shown in the order the words appear in the line: reordering
- * the row by difficulty would break the reader's eye movement across the lyric.
- */
-function pickWords(segment: Segment | null, limit: number): WordTiming[] {
-  if (!segment) return [];
-  const scored = segment.words
-    .filter((w) => w.content !== false && w.zh)
-    .map((w, index) => {
-      // level dominates: 3 points per JLPT step means an N2 noun always beats
-      // an N5 noun, which is the behaviour the "prefer harder words" ask wants
-      let score = levelScore(w.jlpt) * 3;
-      if (w.pos1 === "名詞" || w.pos1 === "動詞" || w.pos1 === "形容詞") score += 2;
-      score += Math.min(3, w.text.length);
-      if (w.kana) score += 1;
-      return { w, score, index };
-    })
-    .sort((a, b) => b.score - a.score || a.index - b.index);
-
-  // never show the same surface twice on one line
-  const seen = new Set<string>();
-  const chosen: { w: WordTiming; index: number }[] = [];
-  for (const { w, index } of scored) {
-    if (seen.has(w.text)) continue;
-    seen.add(w.text);
-    chosen.push({ w, index });
-    if (chosen.length === limit) break;
-  }
-
-  // back to reading order for display
-  chosen.sort((a, b) => a.index - b.index);
-  return chosen.map((c) => c.w);
-}
-
 function VocabCard({
   w,
   i,
@@ -278,6 +103,7 @@ function VocabCard({
   onDragStart,
   onDragOver,
   onDragEnd,
+  romaji,
 }: {
   w: WordTiming;
   i: number;
@@ -292,6 +118,8 @@ function VocabCard({
   onDragStart: (e: React.DragEvent) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDragEnd: () => void;
+  /** settings-aware romaji: particles + long-vowel style already applied */
+  romaji: string;
 }) {
   // Headline the dictionary form when the line uses an inflected one, so the
   // card matches what a learner would look up (逃げる, not 逃げ).
@@ -362,7 +190,7 @@ function VocabCard({
         <span className="vzh">{w.zh}</span>
       </div>
       <div className="vmeta">
-        {w.romaji && <span className="vroma">{w.romaji}</span>}
+        {romaji && <span className="vroma">{romaji}</span>}
         {isLemma && <span className="vused">歌中 {w.text}</span>}
       </div>
     </article>
@@ -496,6 +324,7 @@ export function VocabCards({
   onToggleTrans?: () => void;
 }) {
   const budget = useCardBudget();
+  const [settings] = useSettings();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draft, setDraft] = useState<VocabEdit | GrammarEdit | null>(null);
@@ -643,6 +472,35 @@ export function VocabCards({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editingKey, draft, segment]);
+
+  // Hook order must not depend on `segment` below: the row can be empty for a
+  // moment while the stage switches songs, and a conditional hook would crash
+  // the whole tree on that flip.
+  const [hint, setHint] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hint) return;
+    const t = setTimeout(() => setHint(null), 2600);
+    return () => clearTimeout(t);
+  }, [hint]);
+
+  // the row's own element can only catch right-clicks inside its (clipped) box,
+  // but the spec asks for the *whole stage* — the lyric line above, the cards,
+  // and the gap down to the transport all open the same menu. Listen at the
+  // document and open it anywhere that isn't a card (a card keeps its own
+  // delete-confirm menu) or an already-open menu.
+  useEffect(() => {
+    const onDocContext = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      // a right-click on a card or inside an already-open menu keeps its own
+      // behaviour; the lyric edit box and nav controls keep theirs too
+      if (t.closest("[data-card]") || t.closest(".ctx-menu")) return;
+      if (t.closest(".lyr-edit") || t.closest("nav, header, .tabbar")) return;
+      e.preventDefault();
+      setMenu({ x: e.clientX, y: e.clientY, target: null });
+    };
+    document.addEventListener("contextmenu", onDocContext);
+    return () => document.removeEventListener("contextmenu", onDocContext);
+  }, []);
 
   if (!segment) return null;
 
@@ -802,37 +660,11 @@ export function VocabCards({
     closeMenu();
   }
 
-  const [hint, setHint] = useState<string | null>(null);
-  useEffect(() => {
-    if (!hint) return;
-    const t = setTimeout(() => setHint(null), 2600);
-    return () => clearTimeout(t);
-  }, [hint]);
-
   function onContext(e: React.MouseEvent, card: CardData | null) {
     e.preventDefault();
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, target: card });
   }
-
-  // the row's own element can only catch right-clicks inside its (clipped) box,
-  // but the spec asks for the *whole stage* — the lyric line above, the cards,
-  // and the gap down to the transport all open the same menu. Listen at the
-  // document and open it anywhere that isn't a card (a card keeps its own
-  // delete-confirm menu) or an already-open menu.
-  useEffect(() => {
-    const onDocContext = (e: MouseEvent) => {
-      const t = e.target as HTMLElement;
-      // a right-click on a card or inside an already-open menu keeps its own
-      // behaviour; the lyric edit box and nav controls keep theirs too
-      if (t.closest("[data-card]") || t.closest(".ctx-menu")) return;
-      if (t.closest(".lyr-edit") || t.closest("nav, header, .tabbar")) return;
-      e.preventDefault();
-      setMenu({ x: e.clientX, y: e.clientY, target: null });
-    };
-    document.addEventListener("contextmenu", onDocContext);
-    return () => document.removeEventListener("contextmenu", onDocContext);
-  }, []);
 
   return (
     <>
@@ -901,6 +733,7 @@ export function VocabCards({
               onDragStart={(e) => onDragStart(e, card)}
               onDragOver={(e) => onDragOver(e, card)}
               onDragEnd={onDragEnd}
+              romaji={displayRomaji(card.w, settings)}
             />
           ) : (
             <GrammarCard

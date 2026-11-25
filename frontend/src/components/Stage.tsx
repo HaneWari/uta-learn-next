@@ -47,25 +47,26 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
   }, [song]);
 
   /* same idea for the translation: a dataset meta flag the export also
-     reads, so the video shows exactly the gloss state the listener left */
-  const [transHidden, setTransHidden] = useState(() => {
-    const q = new URLSearchParams(window.location.search).get("hidetrans");
-    if (q !== null) return q === "1";
-    return !!songData.meta.trans_hidden;
-  });
-  // the dataset is the source of truth once it loads — a stale local guess
-  // shouldn't stick around
-  useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get("hidetrans");
-    if (q === null) setTransHidden(!!songData.meta.trans_hidden);
-  }, [songData.meta.trans_hidden]);
+     reads, so the video shows exactly the gloss state the listener left.
+     The click is stored per song rather than mirrored into an effect — the
+     dataset flag stays the source of truth for every song the user has not
+     toggled in this session, and the export URL still wins for the recorder. */
+  const [transChoice, setTransChoice] = useState<{
+    song: string;
+    hidden: boolean;
+  } | null>(null);
+  const urlHidden = new URLSearchParams(window.location.search).get("hidetrans");
+  const transHidden =
+    transChoice?.song === song
+      ? transChoice.hidden
+      : urlHidden === null
+        ? !!songData.meta.trans_hidden
+        : urlHidden === "1";
   const toggleTrans = useCallback(() => {
-    setTransHidden((h) => {
-      const next = !h;
-      onPatchTrans?.(next);
-      return next;
-    });
-  }, []);
+    const next = !transHidden;
+    setTransChoice({ song, hidden: next });
+    onPatchTrans?.(next);
+  }, [transHidden, song, onPatchTrans]);
   // hidden lines are left in the dataset but skipped everywhere the timeline
   // is consumed — the sync engine, the lyric display and the vocab row all
   // see the same filtered segment list, so a removed line just never plays.

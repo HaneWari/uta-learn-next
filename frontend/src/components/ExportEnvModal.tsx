@@ -33,11 +33,8 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
     mounted.current = false;
   }, []);
 
-  const probe = useCallback(async () => {
-    setPhase("probing");
-    setErr(null);
-    try {
-      const e = await api.exportEnv();
+  const applyEnv = useCallback(
+    (e: ExportEnv) => {
       if (!mounted.current) return;
       setEnv(e);
       if (e.ok) {
@@ -45,16 +42,46 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
       } else {
         setPhase("ready");
       }
-    } catch (e2) {
-      if (!mounted.current) return;
-      setErr(e2 instanceof Error ? e2.message : String(e2));
-      setPhase("ready");
-    }
-  }, [onReady]);
+    },
+    [onReady],
+  );
+  const applyFailure = useCallback((e2: unknown) => {
+    if (!mounted.current) return;
+    setErr(e2 instanceof Error ? e2.message : String(e2));
+    setPhase("ready");
+  }, []);
 
+  // `showSpinner` is only for the explicit re-check button: on mount the
+  // initial phase already *is* "probing", and setting state synchronously
+  // inside the mount effect would cascade an extra render.
+  const probe = useCallback(async (showSpinner = false) => {
+    if (showSpinner) {
+      setPhase("probing");
+      setErr(null);
+    }
+    try {
+      applyEnv(await api.exportEnv());
+    } catch (e2) {
+      applyFailure(e2);
+    }
+  }, [applyEnv, applyFailure]);
+
+  // The mount probe goes through a promise chain rather than `probe()` so no
+  // state is written synchronously from the effect body.
   useEffect(() => {
-    void probe();
-  }, [probe]);
+    let alive = true;
+    api
+      .exportEnv()
+      .then((e) => {
+        if (alive) applyEnv(e);
+      })
+      .catch((e2) => {
+        if (alive) applyFailure(e2);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [applyEnv, applyFailure]);
 
   // One-button auto-repair: run the unified fix job, then re-probe. The job
   // itself drops ffmpeg/playwright/chromium as needed; a still-broken browser
@@ -248,7 +275,7 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
               <button className="btn primary" onClick={() => void fix()}>
                 自动修复
               </button>
-              <button className="btn" onClick={() => void probe()}>
+          <button className="btn" onClick={() => void probe(true)}>
                 重新检测
               </button>
             </div>

@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, waitForJob } from "./api";
 import { useSongData } from "./hooks/useSongData";
+import { useTheme } from "./lib/theme";
+import { onSaveFailure } from "./lib/saveQueue";
+import type { SaveFailure } from "./lib/saveQueue";
 import { BackgroundModal } from "./components/BackgroundModal";
 import { ConfigPage } from "./components/ConfigPage";
 import { ExportEnvModal } from "./components/ExportEnvModal";
 import { OffsetModal } from "./components/OffsetModal";
+import { SettingsModal } from "./components/SettingsModal";
 import { Stage } from "./components/Stage";
 import type { SongSummary, StageBackground } from "./types";
 import "./App.css";
@@ -14,6 +18,7 @@ type Tab = "config" | "stage";
 const DEFAULT_BG: StageBackground = { mode: "default", url: null };
 
 export default function App() {
+  useTheme();
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const renderMode = params.get("render") === "1";
   const initialSong = params.get("song");
@@ -29,6 +34,8 @@ export default function App() {
   const [background, setBackground] = useState<StageBackground>(DEFAULT_BG);
   const [bgOpen, setBgOpen] = useState(false);
   const [offsetOpen, setOffsetOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [saveFailure, setSaveFailure] = useState<SaveFailure | null>(null);
   const {
     songData,
     error,
@@ -40,6 +47,12 @@ export default function App() {
 
   const refresh = useCallback(() => {
     api.songs().then(setSongs).catch(() => setSongs([]));
+  }, []);
+
+  // a failed dataset save must never look saved: the toast offers the retry
+  useEffect(() => {
+    onSaveFailure(setSaveFailure);
+    return () => onSaveFailure(null);
   }, []);
 
   useEffect(() => {
@@ -133,26 +146,14 @@ export default function App() {
     [song],
   );
 
-  /* ---- video export: bare stage, no chrome ---- */
-  if (renderMode) {
-    if (error) return <p className="status">载入失败：{error}</p>;
-    if (!songData || !song) return <p className="status">正在载入…</p>;
-    const meta = songs.find((x) => x.name === song);
-    return (
-      <Stage
-        songData={songData}
-        song={song}
-        render
-        hasAudio={meta?.has_audio}
-        background={background}
-      />
-    );
-  }
-
   // A dataset can disappear while its name is still in the URL: the user deleted
   // it, or generated the same song twice (the second one gets a "-2" suffix) and
   // removed the first. Rather than a dead "载入失败 HTTP 404" screen, fall back
   // to whatever is still available and say so.
+  //
+  // These hooks stay above the render-mode early return: the export page mounts
+  // the same component with a different prop, and a conditional hook order would
+  // crash when that prop flips.
   const [recovered, setRecovered] = useState<string | null>(null);
   useEffect(() => {
     if (!error || !songs.length) return;
@@ -171,6 +172,22 @@ export default function App() {
     const t = setTimeout(() => setRecovered(null), 8000);
     return () => clearTimeout(t);
   }, [recovered]);
+
+  /* ---- video export: bare stage, no chrome ---- */
+  if (renderMode) {
+    if (error) return <p className="status">载入失败：{error}</p>;
+    if (!songData || !song) return <p className="status">正在载入…</p>;
+    const meta = songs.find((x) => x.name === song);
+    return (
+      <Stage
+        songData={songData}
+        song={song}
+        render
+        hasAudio={meta?.has_audio}
+        background={background}
+      />
+    );
+  }
 
   const current = songs.find((s) => s.name === song);
   const timeOffset = songData?.meta.time_offset ?? 0;
@@ -198,6 +215,16 @@ export default function App() {
             播放
           </button>
         </div>
+
+        {/* the gear shows on both tabs — settings are not stage-only */}
+        <button
+          className="exportbtn bgbtn gearbtn"
+          onClick={() => setSettingsOpen(true)}
+          title="设置"
+          aria-label="设置"
+        >
+          ⚙
+        </button>
 
         {/* stage-only controls: meaningless (and confusing) on the config tab,
             so they only exist once a song is actually loaded for playback */}
@@ -296,6 +323,8 @@ export default function App() {
         />
       )}
 
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+
       {recovered && (
         <div className="export-toast" role="status">
           <span>{recovered}</span>
@@ -307,6 +336,24 @@ export default function App() {
         <div className="export-toast" role="status">
           <span>{exportNote}</span>
           <button onClick={() => setExportNote(null)} aria-label="关闭">
+            ×
+          </button>
+        </div>
+      )}
+
+      {saveFailure && (
+        <div className="export-toast error" role="alert">
+          <span>保存失败:{saveFailure.message}</span>
+          <button
+            className="toast-retry"
+            onClick={() => {
+              saveFailure.retry();
+              setSaveFailure(null);
+            }}
+          >
+            重试
+          </button>
+          <button onClick={() => setSaveFailure(null)} aria-label="关闭">
             ×
           </button>
         </div>

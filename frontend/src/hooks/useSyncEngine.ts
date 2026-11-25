@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import type { SongData } from "../types";
+import { effectiveWords } from "../lib/words";
 
 interface FlatKana {
   segmentId: number;
@@ -71,8 +72,11 @@ export function useSyncEngine(
     if (!songData) return [];
     const out: FlatKana[] = [];
     for (const seg of songData.segments) {
-      for (let wi = 0; wi < seg.words.length; wi++) {
-        const w = seg.words[wi];
+      // the same list the display renders, so an edited line's rebuilt words
+      // are what gets highlighted
+      const words = effectiveWords(seg);
+      for (let wi = 0; wi < words.length; wi++) {
+        const w = words[wi];
         if (w.chars && w.chars.length) {
           for (let ci = 0; ci < w.chars.length; ci++) {
             const c = w.chars[ci];

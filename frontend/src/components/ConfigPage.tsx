@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, waitForJob } from "../api";
 import type { Job, SearchHit, SongSummary, UploadInfo } from "../types";
+import { useSettings } from "../lib/settings";
 
 interface Props {
   songs: SongSummary[];
@@ -55,6 +56,12 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState<string | null>(null);
   const [picked, setPicked] = useState<SearchHit | null>(null);
+  /* per-source outcome, so a dead source says *which* one and why */
+  const [sourceState, setSourceState] = useState<
+    Record<string, "ok" | "empty" | "error">
+  >({});
+  const [sourceErrors, setSourceErrors] = useState<Record<string, string>>({});
+  const [settings, updateSettings] = useSettings();
   const [lyrics, setLyrics] = useState("");
   /* manual version-matching inputs for the search mode: when the source's
      timeline and the uploaded audio disagree in length, the user types the
@@ -122,7 +129,7 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
     }
   }, []);
 
-  const runSearch = useCallback(async () => {
+  const runSearch = useCallback(async (sortOverride?: string) => {
     const q = query.trim();
     if (q.length < 2) {
       setSearchErr("请输入至少 2 个字符");
@@ -131,28 +138,26 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
     setSearching(true);
     setSearchErr(null);
     setHits([]);
+    setSourceState({});
+    setSourceErrors({});
     setPicked(null);
     try {
-      const { results, errors } = await api.search(q);
-      results.sort((a, b) => {
-        const rank = (k: string) => (k === "char" ? 0 : 1);
-        return rank(a.kind) - rank(b.kind) || a.duration - b.duration;
+      const { results, errors, statuses } = await api.search(q, {
+        duration: upload?.duration ?? 0,
+        sort: sortOverride ?? settings.search_sort,
       });
       setHits(results);
+      setSourceState(statuses ?? {});
+      setSourceErrors(
+        Object.fromEntries(errors.map((e) => [e.source, e.error])),
+      );
       if (!results.length) setSearchErr("三个来源都没有找到，试试别的关键词");
-      if (errors.length) {
-        setSearchErr(
-          `部分来源不可用：${errors
-            .map((e) => SOURCE_LABEL[e.source] ?? e.source)
-            .join("、")}`,
-        );
-      }
     } catch (e) {
       setSearchErr(e instanceof Error ? e.message : String(e));
     } finally {
       setSearching(false);
     }
-  }, [query]);
+  }, [query, upload?.duration, settings.search_sort]);
 
   const track = useCallback(
     async (start: () => Promise<{ job_id: string }>) => {
@@ -392,6 +397,54 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                 </button>
               </div>
 
+              <div className="sort-row">
+                <span className="sort-label">排序</span>
+                <div className="segmented" role="radiogroup" aria-label="搜索排序">
+                  {(
+                    [
+                      ["duration", "时长匹配"],
+                      ["char", "逐字优先"],
+                      ["source", "按来源"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      role="radio"
+                      aria-checked={settings.search_sort === value}
+                      className={settings.search_sort === value ? " on" : ""}
+                      onClick={() => {
+                        updateSettings({ search_sort: value });
+                        if (hits.length) void runSearch(value);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {!upload?.duration && (
+                  <span className="sort-note">未上传音频，时长匹配按逐字优先处理</span>
+                )}
+              </div>
+
+              {(Object.keys(sourceState).length > 0 ||
+                Object.keys(sourceErrors).length > 0) && (
+                <div className="source-states">
+                  {(Object.keys(SOURCE_LABEL) as string[]).map((src) => {
+                    const state = sourceState[src] ?? "ok";
+                    if (state === "ok") return null;
+                    return (
+                      <span key={src} className={`srcstate ${state}`}>
+                        {SOURCE_LABEL[src]}
+                        {state === "empty"
+                          ? "：无结果"
+                          : `：${sourceErrors[src] ?? "不可用"}`}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+
               {searchErr && <p className="hint-warn">{searchErr}</p>}
 
               <div className="hits">
@@ -422,6 +475,9 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                       <span className={`kind${h.kind === "char" ? " char" : ""}`}>
                         {SOURCE_NOTE[h.source] ?? h.kind}
                       </span>
+                      {h.duration_match && (
+                        <span className="hit-match">时长匹配</span>
+                      )}
                       <span className="hit-dur">{fmtDur(h.duration)}</span>
                     </button>
                   );

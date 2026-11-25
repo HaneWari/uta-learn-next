@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, RefObject } from "react";
-import type { Segment, WordTiming } from "../types";
+import type { AppSettings, Segment, WordTiming } from "../types";
 import type { SyncState } from "../hooks/useSyncEngine";
 import { rubyGroups } from "../furigana";
+import { displayRomaji, lineRomaji } from "../lib/romaji";
+import { useSettings } from "../lib/settings";
 
 interface LyricsDisplayProps {
   segments: Segment[];
@@ -22,7 +24,7 @@ interface LyricsDisplayProps {
     original, and an emptied override hides the line's text without deleting
     the underlying words. Reading marks `[汉字](よみ)` are markup, never sung —
     strip them for display / char counting (full-width brackets too). */
-const READING_MARK = /[\[【]([^\]】]+)[\]】]\s*[（(][^（）()]*[)）]/g;
+const READING_MARK = /[【[](?:[^】\]]+)[】\]]\s*[（(][^（）()]*[)）]/g;
 function stripMarks(text: string): string {
   return text.replace(READING_MARK, "$1");
 }
@@ -37,10 +39,13 @@ function shownZh(seg: Segment): string | undefined {
 
 /** The romaji under an upcoming/edited line: rebuilt override words win, so a
     custom reading the user typed shows up in next too. */
-function shownRomaji(seg: Segment): string {
+function shownRomaji(
+  seg: Segment,
+  settings: Pick<AppSettings, "particle_reading" | "long_vowel">,
+): string {
   const ov = seg.lyric_override?.words;
-  if (ov?.length) return ov.map((w) => w.romaji).filter(Boolean).join(" ");
-  return seg.romaji;
+  if (ov?.length) return lineRomaji(ov, settings);
+  return lineRomaji(seg.words, settings) || seg.romaji;
 }
 
 /**
@@ -81,23 +86,26 @@ function RubySurface({
   word: WordTiming;
   renderChar: (ch: string, index: number) => React.ReactNode;
 }) {
-  let index = -1;
+  // The glyph offset of each ruby group, computed without a mutable counter —
+  // the compiler rejects a variable reassigned during render because children
+  // callbacks are deferred. Groups are tiny, so the quadratic prefix sum is
+  // irrelevant next to the clarity of staying immutable.
+  const groups = rubyGroups(word);
+  const offsets = groups.map((_, i) =>
+    groups.slice(0, i).reduce((n, g) => n + g.chars.length, 0),
+  );
   return (
     <span className="surface">
-      {rubyGroups(word).map((group, gi) => {
-        const start = index + 1;
-        index += group.chars.length;
-        return (
-          <span className="ruby-group" key={gi}>
-            <span className={`furi${group.reading ? "" : " blank"}`}>
-              {group.reading ?? ""}
-            </span>
-            <span className="ruby-chars">
-              {group.chars.map((c, k) => renderChar(c.ch, start + k))}
-            </span>
+      {groups.map((group, gi) => (
+        <span className="ruby-group" key={gi}>
+          <span className={`furi${group.reading ? "" : " blank"}`}>
+            {group.reading ?? ""}
           </span>
-        );
-      })}
+          <span className="ruby-chars">
+            {group.chars.map((c, k) => renderChar(c.ch, offsets[gi] + k))}
+          </span>
+        </span>
+      ))}
     </span>
   );
 }
@@ -108,9 +116,10 @@ interface WordViewProps {
   wordIndex: number;
   syncState: SyncState;
   activeRef: RefObject<HTMLSpanElement | null>;
+  romaji: string;
 }
 
-function WordView({ word, segmentId, wordIndex, syncState, activeRef }: WordViewProps) {
+function WordView({ word, segmentId, wordIndex, syncState, activeRef, romaji }: WordViewProps) {
   return (
     <span className="wordbox">
       <RubySurface
@@ -136,7 +145,7 @@ function WordView({ word, segmentId, wordIndex, syncState, activeRef }: WordView
             : ""
         }`}
       >
-        {word.romaji}
+        {romaji}
       </span>
     </span>
   );
@@ -146,9 +155,7 @@ function WordView({ word, segmentId, wordIndex, syncState, activeRef }: WordView
 function NextLine({ segment }: { segment: Segment }) {
   // an edited line previews its *override* words, not the stale source tokens —
   // otherwise the upcoming lyric still shows the text the user just corrected
-  const words = segment.lyric_override?.words?.length
-    ? segment.lyric_override.words
-    : segment.words;
+  const words = effectiveWords(segment);
   return (
     <span className="next-line">
       {words.map((w, i) => (
@@ -163,9 +170,12 @@ function NextLine({ segment }: { segment: Segment }) {
 }
 
 export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false }: LyricsDisplayProps) {
+  const [settings] = useSettings();
   const activeRef = useRef<HTMLSpanElement | null>(null);
   const cur = segments[syncState.displayIndex];
   const next = segments[syncState.displayIndex + 1] ?? null;
+  // one word list for both the render and the highlight index
+  const lineWords = effectiveWords(cur);
   /* ---- lyric editing: double-click to fix the line, right-click to hide it.
      Only the sung text and its Chinese gloss are editable — romaji and the
      word timings come from alignment and are left alone. ---- */
@@ -271,7 +281,7 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
             ) : (
               <span className="next-line">{shownText(next)}</span>
             )}
-            <span className="next-romaji">{shownRomaji(next)}</span>
+            <span className="next-romaji">{shownRomaji(next, settings)}</span>
           </div>
         ) : (
           <div className="next-body" />
@@ -319,11 +329,10 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
               )
             ) : (
               <div className="cur-line">
-                {cur.lyric_override?.words?.length ? (
-                  // hand-edited line: the server re-tokenised it, so it still
-                  // carries furigana, romaji and a re-estimated wipe — just
-                  // not the stale source alignment
-                  cur.lyric_override.words.map((w, i) => (
+                {lineWords.length ? (
+                  // an edited line carries its re-tokenised words: furigana,
+                  // romaji and a re-estimated wipe, not the stale alignment
+                  lineWords.map((w, i) => (
                     <WordView
                       key={i}
                       word={w}
@@ -331,24 +340,14 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
                       wordIndex={i}
                       syncState={syncState}
                       activeRef={activeRef}
+                      romaji={displayRomaji(w, settings)}
                     />
                   ))
                 ) : cur.lyric_override?.text != null ? (
                   // override exists but no words were rebuilt (very short or
                   // unanalysable text) — show it verbatim, still clickable
                   <span className="cur-line-text">{shownText(cur)}</span>
-                ) : (
-                  cur.words.map((w, i) => (
-                    <WordView
-                      key={i}
-                      word={w}
-                      segmentId={cur.id}
-                      wordIndex={i}
-                      syncState={syncState}
-                      activeRef={activeRef}
-                    />
-                  ))
-                )}
+                ) : null}
               </div>
             )}
             {shownZh(cur) && !transHidden && <div className="zh-line">{shownZh(cur)}</div>}

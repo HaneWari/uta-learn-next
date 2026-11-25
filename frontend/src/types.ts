@@ -19,6 +19,12 @@ export interface GrammarHit {
 export interface WordTiming {
   text: string;
   romaji: string;
+  /** romaji of the literal spelling: は → "ha" (particles differ from `romaji`) */
+  romaji_literal?: string;
+  /** sung reading of the word; particles keep their grammatical spelling */
+  pron?: string;
+  /** literal kana spelling (`kana` is the reading used for the wipe) */
+  kana_literal?: string;
   lemma?: string; // dictionary form, e.g. 逃げた → 逃げる
   kana?: string; // reading, e.g. "にげた" over 逃げた
   lemma_kana?: string; // reading of the dictionary form
@@ -109,6 +115,8 @@ export interface SearchHit {
   album: string;
   duration: number;
   kind: "char" | "line";
+  /** true when the duration is within 2 s of the uploaded audio */
+  duration_match?: boolean;
   extra: Record<string, unknown>;
 }
 
@@ -164,4 +172,43 @@ export interface StageBackground {
   mode: "default" | "custom";
   /** cache-busted URL of the stored image, null in default mode */
   url: string | null;
+}
+
+/* ---------- settings ---------- */
+
+export interface AppSettings {
+  update_check: boolean;
+  telemetry: boolean;
+  confirm_close: boolean;
+  particle_reading: "pron" | "literal";
+  long_vowel: "ou" | "macron" | "oo";
+  theme: "system" | "light" | "dark";
+  reduce_motion: boolean;
+  default_layers: {
+    furigana: boolean;
+    romaji: boolean;
+    translation: boolean;
+    next_line: boolean;
+    cards: boolean;
+  };
+  search_sort: "duration" | "char" | "source";
+  jlpt_max: number;
+  proxy_mode: "auto" | "system" | "manual" | "off";
+  proxy_url: string;
+  export_preset: "landscape" | "portrait" | "4k";
+  export_pages: number;
+  export_compat: boolean;
+  install_id: string;
+  telemetry_last_day: string;
+}
+
+export interface AboutInfo {
+  name: string;
+  version: string;
+  python: string;
+  os: string;
+  hostname: string;
+  paths: { app: string; data: string; exports: string };
+  packs: { custom_lyrics: boolean; chromium: boolean };
+  dev: boolean;
 }

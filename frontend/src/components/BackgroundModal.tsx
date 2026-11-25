@@ -46,7 +46,7 @@ export function BackgroundModal({ current, onClose, onApplied }: Props) {
     }
   };
 
-  const useDefault = async () => {
+  const resetToDefault = async () => {
     setBusy(true);
     setErr(null);
     try {
@@ -79,7 +79,7 @@ export function BackgroundModal({ current, onClose, onApplied }: Props) {
         <div className="bgoptions">
           <button
             className={`bgopt${mode === "default" ? " on" : ""}`}
-            onClick={() => void useDefault()}
+            onClick={() => void resetToDefault()}
             disabled={busy}
           >
             <span className="bgopt-thumb paper" />
