@@ -36,6 +36,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import urllib.request
 import zipfile
 from datetime import UTC, datetime
@@ -68,7 +69,13 @@ REQUIREMENTS_LOCK = ROOT / "backend" / "requirements.lock"
 
 
 def say(msg: str) -> None:
-    print(f"  {msg}", flush=True)
+    # Windows CI runners default to a cp1252 console, which cannot encode the
+    # Chinese progress lines and aborts the build before it starts
+    try:
+        print(f"  {msg}", flush=True)
+    except UnicodeEncodeError:
+        sys.stdout.buffer.write(f"  {msg}\n".encode("utf-8", "replace"))
+        sys.stdout.flush()
 
 
 def copy_tree(src: Path, dst: Path, ignore: tuple[str, ...] = ()) -> None:
