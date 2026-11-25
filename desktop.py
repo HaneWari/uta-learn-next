@@ -16,6 +16,7 @@ and anyone debugging the server wants.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import socket
 import sys
@@ -102,6 +103,160 @@ def open_in_browser(url: str) -> bool:
         return False
 
 
+def _active_jobs(base: str) -> int:
+    """How many jobs are still queued or running.
+
+    Closing the window kills the in-process server, so a running build or
+    export would be lost. The plan asks for a confirmation; asking needs a
+    number, otherwise the dialog is a generic "are you sure".
+    """
+    try:
+        with urllib.request.urlopen(base + "/api/jobs?active=true", timeout=2) as r:
+            return len(json.loads(r.read()))
+    except (urllib.error.URLError, OSError, ValueError):
+        return 0
+
+
+def confirm_close(base: str) -> bool:
+    """True when it is safe to close. No jobs → never nag."""
+    count = _active_jobs(base)
+    if count <= 0:
+        return True
+    try:
+        import tkinter
+        from tkinter import messagebox
+
+        root = tkinter.Tk()
+        root.withdraw()
+        answer = messagebox.askyesno(
+            "Uta Learn Next",
+            f"还有 {count} 个任务正在进行（生成、导出或下载）。\n"
+            "退出会中断它们，确定退出吗？",
+        )
+        root.destroy()
+        return bool(answer)
+    except Exception:  # noqa: BLE001
+        # no tkinter (or no display): fail safe by refusing to kill work
+        print(f"[uta] 还有 {count} 个任务在进行,请等待完成后再关闭")
+        return False
+
+
+class SingleInstance:
+    """Named mutex so a second double-click focuses the first window.
+
+    Without it two copies start, both pick a port, and the user has two windows
+    writing the same `localdata/`. On non-Windows the class is a no-op — the
+    desktop shell only ships on Windows.
+    """
+
+    NAME = "UtaLearnNext.SingleInstance"
+
+    def __enter__(self):
+        self.handle = None
+        if os.name != "nt":
+            return self
+        try:
+            import ctypes
+
+            self._ctypes = ctypes
+            self.handle = ctypes.windll.kernel32.CreateMutexW(None, False, self.NAME)
+            already = ctypes.windll.kernel32.GetLastError() == 183  # ERROR_ALREADY_EXISTS
+            if already:
+                raise SystemExit(focus_existing() or 0)
+        except SystemExit:
+            raise
+        except Exception:  # noqa: BLE001
+            # a missing/renamed kernel32 is not worth failing startup over
+            self.handle = None
+        return self
+
+    def __exit__(self, *_exc):
+        if os.name == "nt" and self.handle:
+            try:
+                self._ctypes.windll.kernel32.CloseHandle(self.handle)
+            except Exception:  # noqa: BLE001
+                pass
+        return False
+
+
+def focus_existing() -> int:
+    """Ask the running copy to show itself, then exit 0."""
+    try:
+        import urllib.request
+
+        # the first copy publishes its port in localdata/_ui/port.txt
+        port_file = APP_ROOT / "localdata" / "_ui" / "port.txt"
+        port = int(port_file.read_text(encoding="utf-8").strip())
+        urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/api/system/focus", timeout=2)
+    except Exception:  # noqa: BLE001
+        pass
+    print("[uta] 已经有一个窗口在运行。")
+    return 0
+
+
+def publish_port(port: int) -> None:
+    try:
+        target = APP_ROOT / "localdata" / "_ui"
+        target.mkdir(parents=True, exist_ok=True)
+        (target / "port.txt").write_text(str(port), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _install_tray(window, url: str) -> None:
+    """Best-effort tray icon: 显示主窗口 / 在浏览器中打开 / 打开目录 / 退出.
+
+    pywebview has no tray of its own, so this needs `pystray` + Pillow. Both are
+    optional: a missing tray is a smaller problem than a shell that refuses to
+    start, so every failure here is swallowed and the window still works.
+    """
+    try:
+        import pystray
+        from PIL import Image, ImageDraw
+    except Exception:  # noqa: BLE001
+        return
+
+    def icon_image():
+        img = Image.new("RGB", (64, 64), "#f7efe1")
+        draw = ImageDraw.Draw(img)
+        draw.ellipse((8, 8, 56, 56), outline="#ff8a3d", width=4)
+        draw.text((24, 20), "唄", fill="#b7541a")
+        return img
+
+    def show(_icon, _item=None):
+        try:
+            window.show()
+            window.restore()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def open_dir(_icon, _item=None):
+        import subprocess
+
+        try:
+            if os.name == "nt":
+                subprocess.Popen(["explorer", str(APP_ROOT)])
+        except Exception:  # noqa: BLE001
+            pass
+
+    def quit_app(icon, _item=None):
+        icon.stop()
+        try:
+            window.destroy()
+        except Exception:  # noqa: BLE001
+            os._exit(0)
+
+    menu = pystray.Menu(
+        pystray.MenuItem("显示主窗口", show, default=True),
+        pystray.MenuItem("在浏览器中打开", lambda *_: open_in_browser(url)),
+        pystray.MenuItem("打开应用目录", open_dir),
+        pystray.MenuItem("退出", quit_app),
+    )
+    tray = pystray.Icon("uta-learn-next", icon_image(), "Uta Learn Next", menu)
+    threading.Thread(target=tray.run, daemon=True, name="uta-tray").start()
+
+
 def run_window(url: str) -> bool:
     """pywebview window; False when the backend is unavailable."""
     try:
@@ -121,6 +276,17 @@ def run_window(url: str) -> bool:
             min_size=(900, 600),
             background_color="#f7efe1",
         )
+        # Closing the window kills the in-process server; ask first when work
+        # would be lost. pywebview 5+ supports a closing handler.
+        def on_closing() -> bool:
+            return confirm_close(url.rstrip("/"))
+
+        try:
+            window.events.closing += on_closing
+        except Exception:  # noqa: BLE001
+            pass
+        # the tray menu and the settings page both need a "show me again" hook
+        _install_tray(window, url)
         webview.start(debug=False)
         _save_window_state(window)
         return True
@@ -135,6 +301,16 @@ def main() -> int:
     ap.add_argument("--browser", action="store_true",
                     help="只启动后端并用系统浏览器打开")
     args = ap.parse_args()
+    ap.add_argument("--allow-multiple", action="store_true",
+                    help="debug only: skip the single-instance check")
+
+    if args.allow_multiple:
+        return _run(args)
+    with SingleInstance():
+        return _run(args)
+
+
+def _run(args) -> int:
 
     port = args.port or free_port()
     base = f"http://127.0.0.1:{port}"
@@ -143,6 +319,7 @@ def main() -> int:
     if not wait_ready(base):
         print("[uta] 后端没有就绪，请查看 logs/utalearn.log")
         return 1
+    publish_port(port)
 
     headless = args.browser or os.environ.get("UTALEARN_NO_WINDOW") == "1"
     if not headless and run_window(base):

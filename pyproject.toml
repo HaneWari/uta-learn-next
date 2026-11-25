@@ -1,0 +1,16 @@
+[tool.ruff]
+# A root config so tools/ and desktop.py are linted with the same rules as
+# backend/. Without it ruff falls back to its global defaults here (which
+# enables the whole S band) while backend/ uses an explicit list — the same
+# code then passes in one directory and fails in the other.
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# the desktop shell is a launcher: every tray/browser failure must degrade
+# quietly rather than take the window down with it
+"desktop.py" = ["BLE001", "S110"]

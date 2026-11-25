@@ -22,6 +22,9 @@ jobs:
           enable-cache: true
       - run: uv sync --frozen --extra dev --extra speech --extra export
       - run: uv run ruff check .
+      # the root config covers desktop.py + tools/, which backend/'s config
+      # does not reach
+      - run: uv run ruff check ../desktop.py ../tools
       - run: uv run pytest -q
 
   frontend:

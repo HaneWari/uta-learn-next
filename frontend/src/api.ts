@@ -265,16 +265,82 @@ export const audioUrl = (name: string) =>
 export const songUrl = (name: string) =>
   `${BASE}/api/songs/${encodeURIComponent(name)}`;
 
-/** Poll a job until it settles. */
+/**
+ * Follow a job until it settles.
+ *
+ * The plan asks for SSE first and polling as the fallback. The stream ends
+ * when the job reaches a terminal state, so the common case costs one
+ * connection instead of a request every 600 ms; anything that goes wrong with
+ * EventSource (old webview, a proxy that buffers, an immediate close) silently
+ * falls back to the polling loop that was there before.
+ */
 export async function waitForJob(
   id: string,
   onTick?: (job: Job) => void,
   interval = 600,
 ): Promise<Job> {
+  if (typeof EventSource !== "undefined") {
+    const viaStream = await followJobStream(id, onTick);
+    if (viaStream) return viaStream;
+  }
+
   for (;;) {
     const job = await api.job(id);
     onTick?.(job);
-    if (job.status === "done" || job.status === "error") return job;
+    if (
+      job.status === "done" ||
+      job.status === "error" ||
+      job.status === "canceled" ||
+      job.status === "interrupted"
+    ) {
+      return job;
+    }
     await new Promise((res) => setTimeout(res, interval));
   }
+}
+
+const TERMINAL = new Set(["done", "error", "canceled", "interrupted"]);
+
+/** SSE side of `waitForJob`; `null` means "use polling instead". */
+function followJobStream(
+  id: string,
+  onTick?: (job: Job) => void,
+): Promise<Job | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    let source: EventSource | null = null;
+
+    const finish = (job: Job | null) => {
+      if (settled) return;
+      settled = true;
+      source?.close();
+      resolve(job);
+    };
+
+    try {
+      source = new EventSource(`${BASE}/api/jobs/${id}/events`);
+    } catch {
+      finish(null);
+      return;
+    }
+
+    const onFrame = (e: MessageEvent) => {
+      try {
+        const job = JSON.parse(e.data) as Job;
+        onTick?.(job);
+        if (TERMINAL.has(job.status)) finish(job);
+      } catch {
+        finish(null);
+      }
+    };
+
+    source.addEventListener("job", onFrame);
+    // a failed stream is not an error the user should see: polling picks up
+    source.addEventListener("error", () => finish(null));
+
+    // a stream that never delivers a frame would hang the caller forever
+    window.setTimeout(() => {
+      if (!settled) finish(null);
+    }, 15_000);
+  });
 }

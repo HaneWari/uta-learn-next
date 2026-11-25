@@ -441,6 +441,7 @@ export default function App() {
             onPatchSegment={patchSegment}
             onPatchTrans={(hidden) => void setTransHidden(hidden, true)}
             onPatchView={(view) => void patchView(view)}
+            onUndo={(label) => setExportNote(`已撤销:${label}`)}
           />
         )}
       </div>

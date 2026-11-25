@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import platform
 import socket
+import time
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -104,3 +105,14 @@ def api_telemetry_payload():
     """Exactly what a heartbeat would send — shown in 设置 → 关于."""
     return {"enabled": telemetry.enabled(), "url": telemetry.TELEMETRY_URL,
             "payload": telemetry.payload()}
+
+
+@router.post("/api/system/focus")
+def api_system_focus():
+    """第二实例把已有窗口叫到前台时调用。
+
+    桌面外壳在 `localdata/_ui/port.txt` 里发布端口,第二个进程读它、POST
+    这里,然后退出。这里只记一个时间戳:真正的"显示窗口"由外壳自己轮询。
+    """
+    settings.save({"focus_requested_at": time.time()})
+    return {"focused": True}

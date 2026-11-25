@@ -6,6 +6,7 @@ import { rubyGroups } from "../furigana";
 import { displayRomaji, lineRomaji } from "../lib/romaji";
 import { useSettings } from "../lib/settings";
 import { effectiveWords } from "../lib/words";
+import { pushUndo } from "../lib/saveQueue";
 import type { WordHit } from "./WordPopover";
 
 interface LyricsDisplayProps {
@@ -22,6 +23,10 @@ interface LyricsDisplayProps {
   transHidden?: boolean;
   /** click a word to look it up (disabled in render mode) */
   onWordClick?: (hit: WordHit) => void;
+  /** dataset name, used to scope the undo stack per song */
+  song?: string;
+  /** per-song display layers (furigana / romaji / next line) */
+  layers?: { showFurigana?: boolean; showRomaji?: boolean; showNext?: boolean };
 }
 
 /** The text the listener actually sees: the override wins over the aligned
@@ -86,9 +91,12 @@ function charState(
 function RubySurface({
   word,
   renderChar,
+  showFurigana = true,
 }: {
   word: WordTiming;
   renderChar: (ch: string, index: number) => React.ReactNode;
+  /** the 注音 layer can be switched off per song; the glyphs stay put */
+  showFurigana?: boolean;
 }) {
   // The glyph offset of each ruby group, computed without a mutable counter —
   // the compiler rejects a variable reassigned during render because children
@@ -99,10 +107,10 @@ function RubySurface({
     groups.slice(0, i).reduce((n, g) => n + g.chars.length, 0),
   );
   return (
-    <span className="surface">
+    <span className={`surface${showFurigana ? "" : " no-furi"}`}>
       {groups.map((group, gi) => (
         <span className="ruby-group" key={gi}>
-          <span className={`furi${group.reading ? "" : " blank"}`}>
+          <span className={`furi${group.reading && showFurigana ? "" : " blank"}`}>
             {group.reading ?? ""}
           </span>
           <span className="ruby-chars">
@@ -121,6 +129,8 @@ interface WordViewProps {
   syncState: SyncState;
   activeRef: RefObject<HTMLSpanElement | null>;
   romaji: string;
+  showFurigana?: boolean;
+  showRomaji?: boolean;
   /** null in export mode: the recorder must render, not interact */
   onPick?: (word: WordTiming, e: React.MouseEvent) => void;
 }
@@ -132,6 +142,8 @@ function WordView({
   syncState,
   activeRef,
   romaji,
+  showFurigana = true,
+  showRomaji = true,
   onPick,
 }: WordViewProps) {
   const pick = onPick
@@ -146,6 +158,7 @@ function WordView({
     <span className="wordbox" onClick={pick}>
       <RubySurface
         word={word}
+        showFurigana={showFurigana}
         renderChar={(ch, ci) => {
           const st = charState(syncState, segmentId, wordIndex, ci);
           return (
@@ -159,22 +172,24 @@ function WordView({
           );
         }}
       />
-      <span
-        className={`romaji${
-          syncState.activeSegmentId === segmentId &&
-          syncState.activeWordIndex === wordIndex
-            ? " hot"
-            : ""
-        }`}
-      >
-        {romaji}
-      </span>
+      {showRomaji && (
+        <span
+          className={`romaji${
+            syncState.activeSegmentId === segmentId &&
+            syncState.activeWordIndex === wordIndex
+              ? " hot"
+              : ""
+          }`}
+        >
+          {romaji}
+        </span>
+      )}
     </span>
   );
 }
 
 /** The upcoming line: same ruby treatment, no timing state. */
-function NextLine({ segment }: { segment: Segment }) {
+function NextLine({ segment, showFurigana = true }: { segment: Segment; showFurigana?: boolean }) {
   // an edited line previews its *override* words, not the stale source tokens —
   // otherwise the upcoming lyric still shows the text the user just corrected
   const words = effectiveWords(segment);
@@ -182,7 +197,7 @@ function NextLine({ segment }: { segment: Segment }) {
     <span className="next-line">
       {words.map((w, i) => (
         <span className="wordbox" key={i}>
-          <RubySurface word={w} renderChar={(ch, ci) => (
+          <RubySurface word={w} showFurigana={showFurigana} renderChar={(ch, ci) => (
             <span className="ch" key={ci}>{ch}</span>
           )} />
         </span>
@@ -191,8 +206,12 @@ function NextLine({ segment }: { segment: Segment }) {
   );
 }
 
-export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false, onWordClick }: LyricsDisplayProps) {
+export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false, onWordClick, song, layers }: LyricsDisplayProps) {
   const [settings] = useSettings();
+  // the three presentation layers are per-song switches in `meta.view`;
+  // the shell passes them down so a change is visible without a reload
+  const { showFurigana = true, showRomaji = true, showNext = true } =
+    layers ?? {};
   const activeRef = useRef<HTMLSpanElement | null>(null);
   const cur = segments[syncState.displayIndex];
   const next = segments[syncState.displayIndex + 1] ?? null;
@@ -251,6 +270,17 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
       const textChanged = newText !== (cur.lyric_override?.text ?? cur.text);
       const prevZh = cur.lyric_override?.translation_zh;
       const zhChanged = newZh !== (prevZh ?? cur.translation_zh ?? "");
+      // snapshot the line before the write so Ctrl+Z can restore it; the
+      // re-tokenised `words` are derived by the PATCH route, so restoring the
+      // override (or its absence) is enough
+      if (textChanged || zhChanged) {
+        pushUndo({
+          song: song ?? "",
+          label: textChanged ? "歌词编辑" : "翻译编辑",
+          segmentId: cur.id,
+          restore: { lyric_override: cur.lyric_override ?? null },
+        });
+      }
       onPatch(cur.id, {
         // an emptied line still plays on its timing — it just shows nothing
         lyric_override: {
@@ -294,16 +324,20 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
     <div
       className="stage"
     >
-      <div className={`next-block${next ? "" : " blank"}`}>
+      {/* the 下一句 layer is a per-song switch; hiding it also stops the row
+          from reserving vertical space, so the current line can breathe */}
+      <div className={`next-block${next && showNext ? "" : " blank"}`}>
         <span className="next-label">{next ? "next" : ""}</span>
-        {next ? (
+        {next && showNext ? (
           <div className="next-body" key={`n-${next.id}`}>
             {next.words.length ? (
-              <NextLine segment={next} />
+              <NextLine segment={next} showFurigana={showFurigana} />
             ) : (
               <span className="next-line">{shownText(next)}</span>
             )}
-            <span className="next-romaji">{shownRomaji(next, settings)}</span>
+            {showRomaji && (
+              <span className="next-romaji">{shownRomaji(next, settings)}</span>
+            )}
           </div>
         ) : (
           <div className="next-body" />
@@ -363,6 +397,8 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
                       syncState={syncState}
                       activeRef={activeRef}
                       romaji={displayRomaji(w, settings)}
+                      showFurigana={showFurigana}
+                      showRomaji={showRomaji}
                       onPick={
                         onWordClick && cur
                           ? (word, e) =>

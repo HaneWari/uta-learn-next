@@ -12,6 +12,7 @@ import {
 import type { CardData } from "../lib/cards";
 import { displayRomaji } from "../lib/romaji";
 import { useSettings } from "../lib/settings";
+import { pushUndo } from "../lib/saveQueue";
 
 /** How many vocabulary cards the current window can carry. */
 function useCardBudget() {
@@ -310,8 +311,13 @@ export function VocabCards({
   onToggleHidden,
   transHidden = false,
   onToggleTrans,
+  song,
+  layers,
+  onToggleLayer,
 }: {
   segment: Segment | null;
+  /** needed by the undo stack so Ctrl+Z only reverts this song's edits */
+  song?: string;
   onPatch?: (patch: {
     vocab_override?: Segment["vocab_override"];
     grammar_extra?: Segment["grammar_extra"];
@@ -322,6 +328,9 @@ export function VocabCards({
   /** whole-song toggle for the lyric gloss — shown in the same ctx menu */
   transHidden?: boolean;
   onToggleTrans?: () => void;
+  /** per-song presentation layers, toggled from the same menu */
+  layers?: { furigana: boolean; romaji: boolean; next_line: boolean };
+  onToggleLayer?: (key: "furigana" | "romaji" | "next_line") => void;
 }) {
   const budget = useCardBudget();
   const [settings] = useSettings();
@@ -333,7 +342,9 @@ export function VocabCards({
   const [locked, setLocked] = useState<CardData[] | null>(null);
   const [localSeg, setLocalSeg] = useState<Segment | null>(null);
   const eff = localSeg ?? segment;
-  const live = computeCards(eff, budget);
+  // the JLPT filter is a setting, so it has to be read here rather than baked
+  // into the dataset: changing it re-picks the row without touching the file
+  const live = computeCards(eff, budget, settings.jlpt_max);
   const cards = locked ?? live;
   const empty = !cards.length;
 
@@ -512,7 +523,20 @@ export function VocabCards({
   function save(
     vocab: Segment["vocab_override"] | undefined,
     grammar: Segment["grammar_extra"] | undefined,
+    label = "词条编辑",
   ) {
+    // snapshot before writing: the undo stack replays `restore` verbatim
+    if (song && segment) {
+      pushUndo({
+        song,
+        label,
+        segmentId: segment.id,
+        restore: {
+          vocab_override: segment.vocab_override ?? null,
+          grammar_extra: segment.grammar_extra ?? null,
+        },
+      });
+    }
     const next = onPatch?.({
       vocab_override: vocab,
       grammar_extra: grammar,
@@ -809,6 +833,28 @@ export function VocabCards({
                   {transHidden ? "显示中文翻译" : "隐藏中文翻译"}
                 </button>
               )}
+              {/* the plan puts every display switch in one place, so the same
+                  menu covers 注音 / 罗马音 / 下一句 */}
+              {layers &&
+                onToggleLayer &&
+                (
+                  [
+                    ["furigana", "注音"],
+                    ["romaji", "罗马音"],
+                    ["next_line", "下一句"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    className="ctx-item"
+                    onClick={() => {
+                      closeMenu();
+                      onToggleLayer(key);
+                    }}
+                  >
+                    {layers[key] ? `隐藏${label}` : `显示${label}`}
+                  </button>
+                ))}
             </>
           )}
           <button className="ctx-item dim" onClick={closeMenu}>

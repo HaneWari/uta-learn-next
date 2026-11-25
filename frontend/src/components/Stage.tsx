@@ -1,9 +1,10 @@
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useState } from "react";
 import type { Segment, SongData, StageBackground } from "../types";
 import { useSyncEngine } from "../hooks/useSyncEngine";
 import { usePlayback } from "../hooks/usePlayback";
 import { resolveShortcut } from "../lib/shortcuts";
 import type { ShortcutAction } from "../lib/shortcuts";
+import { popUndo } from "../lib/saveQueue";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { WordPopover } from "./WordPopover";
 import type { WordHit } from "./WordPopover";
@@ -12,6 +13,13 @@ import { LyricsDisplay } from "./LyricsDisplay";
 import { VocabCards } from "./VocabCards";
 
 const SEEK_STEP = 5;
+
+/** URL flag names the export recorder uses for each layer. */
+const LAYER_URL: Record<"furigana" | "romaji" | "next_line", string> = {
+  furigana: "hidefurigana",
+  romaji: "hideromaji",
+  next_line: "hidenext",
+};
 
 interface Props {
   songData: SongData;
@@ -31,9 +39,11 @@ interface Props {
   onPatchTrans?: (hidden: boolean) => void;
   /** persist any other display layer (disabled in render mode) */
   onPatchView?: (view: Record<string, boolean>) => void;
+  /** called after Ctrl+Z restores something, so the shell can toast it */
+  onUndo?: (label: string) => void;
 }
 
-export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment, onPatchTrans, onPatchView }: Props) {
+export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment, onPatchTrans, onPatchView, onUndo }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   /* Song-wide view state. It lives in `meta.view` on the server rather than in
      localStorage: a second browser, the pywebview window, or a copied dataset
@@ -69,17 +79,19 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
     transHiddenRef.current = transHidden;
   }, [cardsHidden, transHidden]);
 
-  const toggleCards = useCallback(() => {
+  // plain functions: they read the refs above, so the keyboard listener stays
+  // stable without the memoisation the compiler could not preserve
+  const toggleCards = () => {
     const next = !cardsHiddenRef.current;
     setViewChoice((prev) => ({ ...prev, cards: next }));
     onPatchView?.({ cards: !next });
-  }, [onPatchView]);
+  };
 
-  const toggleTrans = useCallback(() => {
+  const toggleTrans = () => {
     const next = !transHiddenRef.current;
     setViewChoice((prev) => ({ ...prev, translation: next }));
     onPatchTrans?.(next);
-  }, [onPatchTrans]);
+  };
   // hidden lines are left in the dataset but skipped everywhere the timeline
   // is consumed — the sync engine, the lyric display and the vocab row all
   // see the same filtered segment list, so a removed line just never plays.
@@ -98,8 +110,10 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
   const [helpOpen, setHelpOpen] = useState(false);
   const [wordHit, setWordHit] = useState<WordHit | null>(null);
 
-  const handleAction = useCallback(
-    (action: ShortcutAction) => {
+  // A plain function, refreshed every render through a ref: the keyboard
+  // listener then reads the *current* closure without being rebuilt, and the
+  // compiler keeps its ability to optimise the component.
+  const handleAction = (action: ShortcutAction) => {
       const audio = audioRef.current;
       const at = visibleSegments[syncState.displayIndex];
       switch (action) {
@@ -154,13 +168,22 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
         case "close":
           setHelpOpen(false);
           return;
-        case "undo":
-          window.dispatchEvent(new CustomEvent("uta:undo"));
+        case "undo": {
+          // replay the newest snapshot through the same PATCH route the edit
+          // went through, so undo can never take a side channel
+          const entry = popUndo(song);
+          if (!entry || !onPatchSegment) return;
+          onPatchSegment(entry.segmentId, entry.restore as Partial<Segment>);
+          onUndo?.(entry.label);
           return;
+        }
       }
-    },
-    [audioRef, playback, syncState.displayIndex, toggleCards, toggleTrans, visibleSegments],
-  );
+  };
+
+  const actionRef = useRef(handleAction);
+  useEffect(() => {
+    actionRef.current = handleAction;
+  });
 
   useEffect(() => {
     if (render) return;
@@ -169,11 +192,11 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
       if (!action) return;
       // Space would otherwise scroll, arrows would scroll, "?" types nothing
       if (action !== "undo") e.preventDefault();
-      handleAction(action);
+      actionRef.current(action);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handleAction, render]);
+  }, [render]);
 
   return (
     <div
@@ -218,16 +241,37 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
           transHidden={transHidden}
           onPatch={render ? undefined : onPatchSegment}
           onWordClick={render ? undefined : setWordHit}
+          song={song}
+          layers={{
+            showFurigana: !layerHidden("furigana", "hidefurigana"),
+            showRomaji: !layerHidden("romaji", "hideromaji"),
+            showNext: !layerHidden("next_line", "hidenext"),
+          }}
         />
         {/* the export recorder must never carry the collapsed bar, so the
             whole row is unmounted in render mode when cards are hidden */}
         {!(render && cardsHidden) && (
           <VocabCards
             segment={visibleSegments[syncState.displayIndex] ?? null}
+            song={song}
             hidden={cardsHidden}
             onToggleHidden={toggleCards}
             transHidden={transHidden}
             onToggleTrans={render ? undefined : toggleTrans}
+            layers={{
+              furigana: !layerHidden("furigana", "hidefurigana"),
+              romaji: !layerHidden("romaji", "hideromaji"),
+              next_line: !layerHidden("next_line", "hidenext"),
+            }}
+            onToggleLayer={
+              render
+                ? undefined
+                : (key) => {
+                    const next = layerHidden(key, LAYER_URL[key]);
+                    setViewChoice((prev) => ({ ...prev, [key]: next }));
+                    onPatchView?.({ [key]: !next });
+                  }
+            }
             onPatch={
               render || !onPatchSegment
                 ? undefined

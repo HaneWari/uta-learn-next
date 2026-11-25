@@ -43,3 +43,48 @@ export function reportFailure(message: string, retry: () => void) {
 export function clearFailure() {
   failureListener?.(null);
 }
+
+/* ---------- undo ---------- */
+
+/**
+ * A bounded undo stack, one entry per successful edit.
+ *
+ * The old shortcut only dispatched a `uta:undo` event that nobody listened to,
+ * so Ctrl+Z looked supported and did nothing. Both the card row and the lyric
+ * editor push a snapshot here before writing, and the stage pops the newest
+ * one and replays it through the same PATCH route.
+ */
+export interface UndoEntry {
+  song: string;
+  label: string;
+  /** the segment fields to restore, exactly as they were before the edit */
+  restore: Record<string, unknown>;
+  segmentId: number;
+}
+
+const HISTORY_LIMIT = 20;
+const history: UndoEntry[] = [];
+
+export function pushUndo(entry: UndoEntry) {
+  history.push(entry);
+  if (history.length > HISTORY_LIMIT) history.shift();
+}
+
+/** Pop the newest entry that belongs to `song` (or the newest overall). */
+export function popUndo(song?: string): UndoEntry | null {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (!song || history[i].song === song) {
+      const [entry] = history.splice(i, 1);
+      return entry;
+    }
+  }
+  return null;
+}
+
+export function undoDepth(song?: string): number {
+  return song ? history.filter((e) => e.song === song).length : history.length;
+}
+
+export function clearUndo() {
+  history.length = 0;
+}

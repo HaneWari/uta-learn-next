@@ -91,6 +91,37 @@ describe("pickWords", () => {
   });
 });
 
+describe("pickWords JLPT filter", () => {
+  const line = segment({
+    words: [
+      word("の", { jlpt: "N5", pos1: "助詞", content: false }),
+      word("こと", { jlpt: "N5", pos1: "名詞" }),
+      word("経済", { jlpt: "N1", pos1: "名詞" }),
+      word("謎語", { pos1: "名詞" }), // no JLPT rating at all
+    ],
+  });
+
+  it("keeps everything when the filter is off", () => {
+    expect(pickWords(line, 4, 0).map((w) => w.text)).toEqual([
+      "こと", "経済", "謎語",
+    ]);
+  });
+
+  it("drops N5 words once the user asks for N3 and harder", () => {
+    expect(pickWords(line, 4, 3).map((w) => w.text)).toEqual(["経済", "謎語"]);
+  });
+
+  it("keeps unrated words — the dictionary simply has no level", () => {
+    expect(pickWords(line, 4, 1)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ text: "謎語" })]),
+    );
+  });
+
+  it("N1-only keeps just the hardest word", () => {
+    expect(pickWords(line, 4, 1).map((w) => w.text)).toEqual(["経済", "謎語"]);
+  });
+});
+
 describe("computeCards", () => {
   const fourWords = [
     word("一", { jlpt: "N5" }),

@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
-from app import dicts
+from app import dicts  # noqa: E402  (the import needs the path above)
 
 DATA = Path(os.environ.get("UTALEARN_DATA_DIR", ROOT / "localdata"))
 DRY = "--apply" not in sys.argv
@@ -80,7 +80,7 @@ def recompute_content(data: dict) -> int:
             ok = False
         if not ok:
             continue
-        for w, (a, b) in zip(seg.get("words", []), offsets):
+        for w, (a, b) in zip(seg.get("words", []), offsets, strict=False):
             if any(a < y and x < b for x, y in spans) and w.get("content") is not False:
                 w["content"] = False
                 changed += 1

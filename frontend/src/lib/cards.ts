@@ -76,13 +76,14 @@ export function normGrammar(ov?: Segment["grammar_extra"]) {
 export function computeCards(
   segment: Segment | null,
   budget: number,
+  jlptMax = 0,
 ): CardData[] {
   if (!segment) return [];
   const ov = normOverride(segment.vocab_override);
   const gov = normGrammar(segment.grammar_extra);
 
   // ask for one extra word so hiding a card can be backfilled, like before
-  const generated = pickWords(segment, budget + 1);
+  const generated = pickWords(segment, budget + 1, jlptMax);
   const shown = generated.filter(
     (w) => !ov.hide.includes(segment.words.indexOf(w)),
   );
@@ -163,10 +164,23 @@ export function computeCards(
  * the cards are still shown in the order the words appear in the line: reordering
  * the row by difficulty would break the reader's eye movement across the lyric.
  */
-export function pickWords(segment: Segment | null, limit: number): WordTiming[] {
+/** `jlptMax` is the hardest level the user still wants (1 = N1 only, 5 = all,
+ *  0 = no filter). Lowering it removes the easy words that make a card row
+ *  feel noisy — の / する / こと at N5 crowd out the words worth learning. */
+export function pickWords(
+  segment: Segment | null,
+  limit: number,
+  jlptMax = 0,
+): WordTiming[] {
   if (!segment) return [];
   const scored = segment.words
-    .filter((w) => w.content !== false && w.zh)
+    .filter((w) => {
+      if (w.content === false || !w.zh) return false;
+      if (!jlptMax) return true;
+      const level = levelScore(w.jlpt);
+      // no JLPT tag: keep it, the dictionary simply lacks a rating
+      return level === 0 || level >= 6 - jlptMax;
+    })
     .map((w, index) => {
       // level dominates: 3 points per JLPT step means an N2 noun always beats
       // an N5 noun, which is the behaviour the "prefer harder words" ask wants
