@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 
 from app import guard, logs, packs, settings, telemetry
 from app.paths import APP_ROOT, DATA_DIR, EXPORT_DIR
+from app.schemas import ProxyTestRequest, SettingsPatch
 from app.sources import resolve_proxy
 from app.version import APP_NAME, APP_VERSION
 
@@ -27,7 +28,7 @@ def api_settings_get():
 
 
 @router.patch("/api/settings")
-def api_settings_patch(patch: dict):
+def api_settings_patch(patch: SettingsPatch):
     if not isinstance(patch, dict):
         raise HTTPException(status_code=400, detail="设置必须是对象")
     allowed = set(settings.DEFAULTS)
@@ -52,13 +53,13 @@ def api_settings_reset():
 
 
 @router.post("/api/settings/test-proxy")
-def api_settings_test_proxy(payload: dict | None = None):
+def api_settings_test_proxy(payload: ProxyTestRequest | None = None):
     """Probe the proxy the app would use right now.
 
     A manual URL in the body is tested *without* being saved, so the settings
     page can validate a value before the user commits to it.
     """
-    manual = (payload or {}).get("proxy_url")
+    manual = (payload.proxy_url if payload else None)
     proxy = (manual or "").strip() or resolve_proxy()
     try:
         with httpx.Client(proxy=proxy, timeout=8.0, follow_redirects=True) as c:

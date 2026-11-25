@@ -1,7 +1,9 @@
 """配置页 API:歌词源搜索、音频上传、按歌词源或自填歌词生成数据集。"""
 from __future__ import annotations
 
+import base64
 import json
+import re
 import uuid
 from pathlib import Path
 
@@ -9,7 +11,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from app import fallback, jobs, settings
+from app import fallback, jobs, local_lyrics, settings
 from app import translate as translate_mod
 from app.builder import build as build_song
 from app.datasets import (
@@ -25,9 +27,16 @@ from app.datasets import (
     upload_path as _upload_path,
 )
 from app.paths import AUDIO_EXT, MAX_UPLOAD, UPLOAD_DIR
+from app.schemas import (
+    BuildLocalRequest,
+    BuildRequest,
+    BuildTextRequest,
+    SearchRequest,
+)
 from app.sources import SOURCES, Song, get_source, search_all
 
 router = APIRouter()
+LYRICS_DIR = UPLOAD_DIR.parent / "_lyrics"
 
 
 @router.get("/api/sources")
@@ -36,16 +45,16 @@ def api_sources():
 
 
 @router.post("/api/search")
-async def api_search(payload: dict):
-    query = (payload.get("query") or "").strip()
+async def api_search(payload: SearchRequest):
+    query = (payload.query or "").strip()
     if len(query) < 2:
         raise HTTPException(status_code=400, detail="请输入至少 2 个字符")
-    names = payload.get("sources") or None
+    names = payload.sources or None
     try:
-        audio_duration = float(payload.get("duration") or 0)
+        audio_duration = float(payload.duration or 0)
     except (TypeError, ValueError):
         audio_duration = 0.0
-    sort = payload.get("sort") or settings.get("search_sort", "duration")
+    sort = payload.sort or settings.get("search_sort", "duration")
     results, errors, statuses = await run_in_threadpool(
         search_all, query, names, audio_duration, sort)
     return {"results": results, "errors": errors, "statuses": statuses,
@@ -95,7 +104,7 @@ def _song_from_payload(raw: dict) -> Song:
 
 
 @router.post("/api/build")
-async def api_build(payload: dict):
+async def api_build(payload: BuildRequest):
     """Build a dataset from a lyric source, optionally against the user's audio.
 
     With no audio the source's own timestamps are authoritative (QQ/Kugou give
@@ -104,10 +113,10 @@ async def api_build(payload: dict):
     is a different edit (a TV-size cut, a live take) would get a dataset that is
     uniformly offset by the difference between the two recordings.
     """
-    song = _song_from_payload(payload.get("song") or {})
-    upload_id = payload.get("upload_id")
-    title = (payload.get("title") or song.title).strip()
-    artist = (payload.get("artist") or song.artist).strip()
+    song = _song_from_payload(payload.song or {})
+    upload_id = payload.upload_id
+    title = (payload.title or song.title).strip()
+    artist = (payload.artist or song.artist).strip()
     name = _free_name(f"{title} {artist}".strip())
     audio = _upload_path(upload_id) if upload_id else None
     label = get_source(song.source).label
@@ -134,8 +143,8 @@ async def api_build(payload: dict):
         # begins (source longer, intro skipped); `audio_start` says where in
         # the *audio* the lyric timeline begins (audio longer, instrumental
         # intro). Seconds are "m:ss" strings straight from the config page.
-        lyric_start = _mmss(payload.get("lyric_start"))
-        audio_start = _mmss(payload.get("audio_start"))
+        lyric_start = _mmss(payload.lyric_start)
+        audio_start = _mmss(payload.audio_start)
 
         if audio is not None:
             got = fallback.probe_duration(audio)
@@ -196,18 +205,18 @@ async def api_build(payload: dict):
 
 
 @router.post("/api/build-text")
-async def api_build_text(payload: dict):
+async def api_build_text(payload: BuildTextRequest):
     """Estimate timing from an uploaded audio + the user's own lyric text."""
-    upload_id = (payload.get("upload_id") or "").strip()
-    text = payload.get("lyrics") or ""
+    upload_id = (payload.upload_id or "").strip()
+    text = payload.lyrics or ""
     if not upload_id:
         raise HTTPException(status_code=400, detail="请先上传音频")
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if len(lines) < 2:
         raise HTTPException(status_code=400, detail="请粘贴歌词，每行一句（至少 2 行）")
     audio = _upload_path(upload_id)
-    title = (payload.get("title") or audio.stem).strip()
-    artist = (payload.get("artist") or "").strip()
+    title = (payload.title or audio.stem).strip()
+    artist = (payload.artist or "").strip()
     name = _free_name(f"{title} {artist}".strip())
 
     jid = jobs.create("custom", "cpu")
@@ -225,7 +234,7 @@ async def api_build_text(payload: dict):
         # translation is part of the build job, not a separate step: it only
         # runs when the user asked for it, after the timing is already solved,
         # so a missing translate pack never wastes a whisper pass
-        if payload.get("translate"):
+        if payload.translate:
             progress(0.93, f"翻译 {len(data['segments'])} 行…")
             try:
                 zh = translate_mod.translate_lines(
@@ -245,6 +254,102 @@ async def api_build_text(payload: dict):
 
     jobs.run(jid, work)
     return {"job_id": jid, "name": name}
+
+
+@router.post("/api/uploads/lyrics")
+async def api_upload_lyrics(file: UploadFile):
+    """解析一个本地歌词文件,先给前端看预览再决定是否生成。
+
+    这里只做解析和校验,不写数据集:用户可能选错文件,先让他看一眼行数、
+    是否逐字,再决定要不要花几分钟建库。
+    """
+    name = file.filename or "lyrics"
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="文件是空的")
+    try:
+        parsed = local_lyrics.parse(name, data)
+    except local_lyrics.UnsupportedLyrics as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+    units = sum(len(line.get("units") or []) for line in parsed.lines)
+    return {
+        "filename": name,
+        "kind": parsed.kind,
+        "lines": len(parsed.lines),
+        "units": units,
+        "translation": len(parsed.translation),
+        "preview": [
+            {"start": round(line["start"], 2), "end": round(line["end"], 2),
+             "text": "".join(u[0] for u in line.get("units") or [])}
+            for line in parsed.lines[:8]
+        ],
+        "token": _stage_lyrics(data, name),
+    }
+
+
+def _stage_lyrics(data: bytes, name: str) -> str:
+    """暂存上传的歌词;生成时凭 token 取回,不信任客户端重传。"""
+    token = uuid.uuid4().hex[:12]
+    LYRICS_DIR.mkdir(parents=True, exist_ok=True)
+    (LYRICS_DIR / f"{token}.json").write_text(
+        json.dumps({"name": name, "b64": base64.b64encode(data).decode()}),
+        encoding="utf-8")
+    return token
+
+
+def _load_staged_lyrics(token: str) -> tuple[str, bytes]:
+    if not re.fullmatch(r"[0-9a-f]{12}", token or ""):
+        raise HTTPException(status_code=400, detail="bad lyrics token")
+    path = LYRICS_DIR / f"{token}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="歌词文件已过期,请重新上传")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    return raw.get("name") or "lyrics", base64.b64decode(raw["b64"])
+
+
+@router.post("/api/build-local")
+async def api_build_local(payload: BuildLocalRequest):
+    """用本地歌词文件 + 已上传的音频生成数据集(5.3.2)。"""
+    token = (payload.lyrics_token or "").strip()
+    upload_id = (payload.upload_id or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="请先选择歌词文件")
+    if not upload_id:
+        raise HTTPException(status_code=400, detail="请先上传音频")
+    name_in, data = _load_staged_lyrics(token)
+    try:
+        parsed = local_lyrics.parse(name_in, data)
+    except local_lyrics.UnsupportedLyrics as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+    audio = _upload_path(upload_id)
+    title = (payload.title or audio.stem).strip()
+    artist = (payload.artist or "").strip()
+    out_name = _free_name(f"{title} {artist}".strip())
+    jid = jobs.create("custom", "cpu")
+
+    def work(progress):
+        progress(0.15, f"读取 {name_in} …")
+        data_out = build_song(parsed, {
+            "title": title, "artist": artist,
+            "youtube_url": "", "language": "ja",
+            "whisperx_model": "none",
+            "align_model": f"本地歌词文件({name_in})",
+            "vocal_separation": "none",
+            "source": "本地歌词文件",
+            "source_kind": parsed.kind,
+        })
+        if not data_out["segments"]:
+            raise RuntimeError("歌词解析后为空")
+        progress(0.7, "写入数据集…")
+        _save_dataset(out_name, data_out, audio)
+        return {"name": out_name, "title": title, "artist": artist,
+                "segments": len(data_out["segments"]),
+                "duration": data_out["meta"]["duration_seconds"],
+                "has_audio": True}
+
+    jobs.run(jid, work)
+    return {"job_id": jid, "name": out_name}
 
 
 @router.get("/api/jobs")

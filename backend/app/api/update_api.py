@@ -4,6 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app import jobs, settings, updater
+from app.schemas import UpdateApplyRequest
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ def api_update_check(force: bool = False):
 
 
 @router.post("/api/update/apply")
-def api_update_apply(payload: dict | None = None):
+def api_update_apply(payload: UpdateApplyRequest | None = None):
     """Download the pending update in the background and stage it."""
     body = payload or {}
     try:

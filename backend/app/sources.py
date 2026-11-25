@@ -20,6 +20,7 @@ from urllib.request import getproxies
 
 import httpx
 
+from . import search_cache
 from .qrc_des import qrc_decrypt
 
 TIMEOUT = 20
@@ -330,11 +331,16 @@ class KugouSource:
         body = raw[4:]
         plain = bytes(b ^ KRC_KEY[i % len(KRC_KEY)] for i, b in enumerate(body))
         text = zlib.decompress(plain).decode("utf-8", errors="replace")
-        return ParsedLyrics(lines=_parse_krc_lines(text), kind="char")
+        return ParsedLyrics(lines=_parse_krc_lines(text),
+                            translation=_parse_krc_translation(text),
+                            kind="char")
 
 
 KRC_LINE_RE = re.compile(r"^\[(\d+),(\d+)\](.*)$")
 KRC_UNIT_RE = re.compile(r"<(\d+),(\d+),\d+>([^<\[]*)")
+# `[language:base64]` carries the translated track: a `[start,dur]text` body
+# with the same shape as the lyrics, just in another language
+KRC_LANG_RE = re.compile(r"^\[language:([A-Za-z0-9+/=]+)\]$")
 
 
 def _parse_krc_lines(text: str) -> list[dict]:
@@ -356,6 +362,37 @@ def _parse_krc_lines(text: str) -> list[dict]:
             out.append({"start": start / 1000.0, "end": (start + dur) / 1000.0,
                         "units": units})
     return out
+
+
+def _parse_krc_translation(text: str) -> list[tuple[float, str]]:
+    """Translation lines from a KRC payload's `[language:...]` block.
+
+    Kugou does not always ship one; an empty list simply means the build has no
+    glosses, which the UI already handles. A malformed block is ignored rather
+    than failing the fetch — the lyrics are the point, the translation is a
+    bonus.
+    """
+    for raw in text.splitlines():
+        m = KRC_LANG_RE.match(raw.strip())
+        if not m:
+            continue
+        try:
+            body = base64.b64decode(m.group(1)).decode("utf-8", errors="replace")
+        except (ValueError, TypeError):
+            continue
+        out: list[tuple[float, str]] = []
+        for line in body.splitlines():
+            lm = KRC_LINE_RE.match(line.strip())
+            if not lm:
+                continue
+            start = int(lm.group(1)) / 1000.0
+            # the translated body carries no per-character tags
+            body_text = KRC_UNIT_RE.sub(lambda mm: mm.group(3), lm.group(3))
+            body_text = body_text.strip()
+            if body_text:
+                out.append((start, body_text))
+        return out
+    return []
 
 
 # --------------------------------------------------------------------------- #
@@ -454,6 +491,12 @@ def search_all(query: str, names: list[str] | None = None,
     if not wanted:
         return results, errors, statuses
 
+    cached = search_cache.get(query, names)
+    if cached is not None:
+        cached_results, cached_errors, cached_statuses = cached
+        return (sort_results(cached_results, sort, audio_duration),
+                cached_errors, cached_statuses)
+
     pool = ThreadPoolExecutor(max_workers=len(wanted), thread_name_prefix="search")
     futures = {pool.submit(_search_one, key, src, query): key
                for key, src in wanted.items()}
@@ -475,6 +518,7 @@ def search_all(query: str, names: list[str] | None = None,
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
+    search_cache.put(query, names, results, errors, statuses)
     return sort_results(results, sort, audio_duration), errors, statuses
 
 

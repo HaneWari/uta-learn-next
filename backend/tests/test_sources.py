@@ -28,6 +28,13 @@ def song(name: str, duration: float, kind: str = "char", source: str = "qq") -> 
             "album": "", "duration": duration, "kind": kind, "extra": {}}
 
 
+@pytest.fixture(autouse=True)
+def no_search_cache(monkeypatch):
+    """The 24h cache lives on disk; a test must never see another test's hits."""
+    monkeypatch.setattr(sources.search_cache, "get", lambda *a, **k: None)
+    monkeypatch.setattr(sources.search_cache, "put", lambda *a, **k: None)
+
+
 @pytest.fixture
 def three_sources(monkeypatch):
     table = {

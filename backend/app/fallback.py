@@ -44,9 +44,9 @@ from .dicts import (
     apply_reading_marks,
     enrich,
     find_grammar,
-    is_content,
     parse_reading_marks,
 )
+from .vocab_rules import content_flag, grammar_spans
 
 PUNCT_RE = re.compile(r"[\s、。,.!?！？…「」『』()（）・~〜\-—:;\"'’“”]")
 JP_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
@@ -96,6 +96,23 @@ def probe_duration(src: str | Path) -> float:
         return float(out.strip())
     except ValueError:
         return 0.0
+
+
+def to_wav_window(src: str | Path, start: float, end: float) -> Path:
+    """Decode only `[start, end]` of a file to 16 kHz mono PCM.
+
+    Single-line realignment passes ±5 s, so decoding the whole song to reach
+    five seconds of it would dominate the cost of the operation.
+    """
+    fd, name = tempfile.mkstemp(prefix="utalearn-win-", suffix=".wav")
+    os.close(fd)
+    dst = Path(name)
+    cmd = [binaries.ffmpeg(), "-y", "-v", "error",
+           "-ss", f"{max(0.0, start):.3f}", "-t", f"{max(0.1, end - start):.3f}",
+           "-i", str(src), "-ac", "1", "-ar", "16000",
+           "-acodec", "pcm_s16le", str(dst)]
+    subprocess.run(cmd, check=True, capture_output=True)
+    return dst
 
 
 def load_wav(path: str | Path) -> tuple[np.ndarray, int]:
@@ -595,10 +612,7 @@ def build_from_audio(audio: str | Path, lines: list[str], meta: dict,
         # know their character offsets -- the stored word start/end are
         # seconds, so the UI cannot work this out.
         grammar = find_grammar(text, tokens)
-        gspans = [(g["at"], g["at"] + len(g["matched"])) for g in grammar]
-
-        def _in_grammar(tok: dict, spans=gspans) -> bool:
-            return any(tok["start"] < b and a < tok["end"] for a, b in spans)
+        gspans = grammar_spans(grammar)
 
         out_words = []
         for tk in tokens:
@@ -613,7 +627,7 @@ def build_from_audio(audio: str | Path, lines: list[str], meta: dict,
                 "start": seg_chars[0]["start"], "end": seg_chars[-1]["end"],
                 "score": round(0.55 + 0.35 * cov, 3),
                 "chars": seg_chars,
-                "content": is_content(tk) and not _in_grammar(tk),
+                "content": content_flag(tk, gspans),
             }
             if tk.get("kana"):
                 w["kana"] = tk["kana"]

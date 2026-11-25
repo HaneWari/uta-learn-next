@@ -3,16 +3,18 @@ from __future__ import annotations
 
 import re
 import shutil
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app import repo, vocab
+from app import jobs, packs, realign, repo, vocab
 from app.builder import retime_words
-from app.datasets import dataset, list_datasets
+from app.datasets import dataset, find_audio, list_datasets
 from app.dicts import analyze, enrich, find_grammar, parse_reading_marks
 from app.paths import DATA_DIR, NO_CACHE
+from app.schemas import VocabItem
 from app.version import APP_VERSION
 
 router = APIRouter()
@@ -111,6 +113,9 @@ def api_patch_song(name: str, patch: dict, request: Request):
     A payload without `id` carrying only song-wide keys (`time_offset`) updates
     `meta` instead.
     """
+    # A PATCH is a partial Segment with a caller-chosen key set, so it stays a
+    # plain dict: the writable-key check below is stricter than any model would
+    # be, and it produces the Chinese 只读字段 message the UI shows verbatim.
     if "id" not in patch and patch and set(patch.keys()) <= _META_KEYS:
         return _patch_meta(name, patch, request)
     bad = set(patch.keys()) - _WRITABLE_KEYS
@@ -234,7 +239,7 @@ def api_vocab_list(song: str | None = None):
 
 
 @router.post("/api/vocab")
-def api_vocab_add(item: dict):
+def api_vocab_add(item: VocabItem):
     try:
         return vocab.add(item)
     except ValueError as e:
@@ -253,3 +258,67 @@ def api_vocab_delete(song: str, segment_id: int, text: str = ""):
 @router.delete("/api/vocab")
 def api_vocab_clear(song: str | None = None):
     return {"removed": vocab.clear(song)}
+
+
+@router.post("/api/songs/{name}/realign/{segment_id}")
+def api_realign_line(name: str, segment_id: int):
+    """Re-run alignment for one line against ±5 s of its own audio (5.3.3).
+
+    Only the line's own word timings change; the transcript, the overrides and
+    every other segment are untouched. Needs the custom-lyrics pack — without
+    it the caller gets a 409 with the install hint the config page already uses.
+    """
+    if not packs.whisper_installed():
+        raise HTTPException(
+            status_code=409,
+            detail="单行重新对齐需要自定义歌词扩展包,请先在自定义歌词页安装",
+        )
+    folder = dataset(name)
+    audio = find_audio(folder)
+    if audio is None:
+        raise HTTPException(status_code=400, detail="这个数据集没有音频")
+    path = folder / "song_data.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="song_data.json missing")
+
+    data = repo.read(path)
+    seg = next((s for s in data.get("segments", []) if s.get("id") == segment_id), None)
+    if seg is None:
+        raise HTTPException(status_code=404, detail="segment not found")
+    # an edited line is what the user is looking at, so align that text
+    text = (seg.get("lyric_override") or {}).get("text") or seg.get("text") or ""
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="这一行没有文字,无法重新对齐")
+
+    jid = jobs.create("realign", "cpu")
+
+    def work(progress):
+        progress(0.1, "准备音频窗口…")
+        result = realign.realign_line(audio, text, seg["start"], seg["end"],
+                                      progress)
+
+        def mutate(current: dict) -> None:
+            target = next(
+                (s for s in current.get("segments", []) if s.get("id") == segment_id),
+                None)
+            if target is None:
+                raise HTTPException(status_code=404, detail="segment not found")
+            words = target.get("lyric_override", {}).get("words") or target.get("words") or []
+            chars = result["chars"]
+            # hand the new glyph times back to the words in order: every word
+            # owns the run of characters it renders
+            cursor = 0
+            for word in words:
+                length = len(word.get("text") or "")
+                word["chars"] = chars[cursor:cursor + length]
+                cursor += length
+                if cursor >= len(chars):
+                    break
+            target["aligned_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+        _save_song(path, mutate, None)
+        progress(0.99, "完成")
+        return {"segment_id": segment_id, **result}
+
+    jobs.run(jid, work)
+    return {"job_id": jid}

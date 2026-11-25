@@ -23,12 +23,12 @@ from .dicts import (
     apply_reading_marks,
     enrich,
     find_grammar,
-    is_content,
     is_punct,
     mora_count,
     parse_reading_marks,
 )
 from .sources import ParsedLyrics
+from .vocab_rules import content_flag, grammar_spans
 
 PUNCT = set(" \u3000\t、。,.!?！？…「」『』()（）・~〜-—–:;\"'’“”　")
 
@@ -223,12 +223,17 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
                                    remap(line["end"]), tokens)
         enrich(tokens)
 
+        # detect the line's patterns first: a word inside one is grammar
+        # material, and both pipelines now agree on that (vocab_rules)
+        grammar = find_grammar(text, tokens)
+        spans = grammar_spans(grammar)
+
         words = []
         for t in tokens:
             seg_chars = chars[t["start"]:t["end"]]
             if not seg_chars:
                 continue
-            w = _word_entry(t, seg_chars)
+            w = _word_entry(t, seg_chars, spans)
             words.append(w)
 
         if not words:
@@ -245,7 +250,6 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
         zh = _match_translation(trans, seg["start"])
         if zh:
             seg["translation_zh"] = zh
-        grammar = find_grammar(text, tokens)
         if grammar:
             seg["grammar"] = grammar
         segments.append(seg)
@@ -263,7 +267,8 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
     }
 
 
-def _word_entry(t: dict, seg_chars: list[dict]) -> dict:
+def _word_entry(t: dict, seg_chars: list[dict],
+               spans: list[tuple[int, int]] | None = None) -> dict:
     surface = t["surface"]
     w = {
         "text": surface,
@@ -274,7 +279,7 @@ def _word_entry(t: dict, seg_chars: list[dict]) -> dict:
         "end": seg_chars[-1]["end"],
         "score": 1.0,
         "chars": seg_chars,
-        "content": is_content(t),
+        "content": content_flag(t, spans),
     }
     if t.get("kana"):
         w["kana"] = t["kana"]
@@ -320,11 +325,12 @@ def retime_words(text: str, start: float, end: float,
     _prefer_kana_lemma(tokens)
     chars = _times_by_mora(plain, float(start), float(end), tokens)
     enrich(tokens)
+    spans = grammar_spans(find_grammar(plain, tokens))
     words = []
     for t in tokens:
         seg_chars = chars[t["start"]:t["end"]]
         if seg_chars:
-            words.append(_word_entry(t, seg_chars))
+            words.append(_word_entry(t, seg_chars, spans))
     return words
 
 

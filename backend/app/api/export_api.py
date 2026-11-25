@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse
 from app import export, jobs
 from app.datasets import audio_duration, dataset, find_audio, meta_flag
 from app.paths import APP_ROOT, BASE_URL, EXPORT_DIR
+from app.schemas import ExportRequest, RevealRequest
 
 router = APIRouter()
 DEFAULT_PRESET_FOR_EXPORT = export.DEFAULT_PRESET
@@ -146,7 +147,7 @@ def api_exports():
 
 
 @router.post("/api/exports/reveal")
-def api_export_reveal(payload: dict | None = None):
+def api_export_reveal(payload: RevealRequest | None = None):
     """Open the export folder in the OS file manager.
 
     Only the folder itself — no path from the request is honoured, so this can
@@ -156,7 +157,7 @@ def api_export_reveal(payload: dict | None = None):
     import sys
 
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
-    name = (payload or {}).get("file")
+    name = (payload.file if payload else None)
     if sys.platform == "win32":
         if name:
             subprocess.Popen(["explorer", "/select,", str(EXPORT_DIR / name)])
@@ -183,9 +184,9 @@ def _base_url(request: Request) -> str:
 
 
 @router.post("/api/export")
-async def api_export(payload: dict, request: Request):
+async def api_export(payload: ExportRequest, request: Request):
     """Record the stage for one dataset and mux its audio into an MP4."""
-    name = (payload.get("song") or "").strip()
+    name = (payload.song or "").strip()
     if not name:
         raise HTTPException(status_code=400, detail="缺少 song")
     folder = dataset(name)
@@ -208,11 +209,11 @@ async def api_export(payload: dict, request: Request):
 
     # a clip export: both ends must sit inside the audio, and the order matters
     try:
-        clip_start = max(0.0, float(payload.get("clip_start") or 0))
+        clip_start = max(0.0, float(payload.clip_start or 0))
     except (TypeError, ValueError):
         clip_start = 0.0
     try:
-        requested = float(payload.get("clip_end") or 0)
+        requested = float(payload.clip_end or 0)
     except (TypeError, ValueError):
         requested = 0.0
     clip_end = duration if requested <= 0 else min(requested, duration)
@@ -220,7 +221,7 @@ async def api_export(payload: dict, request: Request):
         raise HTTPException(status_code=400, detail="片段至少要有 1 秒")
     duration = clip_end - clip_start
 
-    preset_name = payload.get("preset") or DEFAULT_PRESET_FOR_EXPORT
+    preset_name = payload.preset or DEFAULT_PRESET_FOR_EXPORT
     if preset_name not in export.PRESETS:
         preset_name = DEFAULT_PRESET_FOR_EXPORT
 
@@ -232,7 +233,7 @@ async def api_export(payload: dict, request: Request):
     # dataset's `meta.view` is the source of truth now; the body's
     # `hide_cards` is only a fallback for callers predating that.
     view = meta.get("view") or {}
-    hide_cards = view.get("cards") is False or bool(payload.get("hide_cards"))
+    hide_cards = view.get("cards") is False or bool(payload.hide_cards)
     hide_trans = view.get("translation") is False or meta_flag(name, "trans_hidden")
 
     jid = jobs.create("export", "export")
