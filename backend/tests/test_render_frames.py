@@ -32,6 +32,10 @@ class TestPageCount:
 class TestEncoder:
     def test_it_encodes_a_silent_video_track(self, tmp_path):
         # audio is added once at concat time, so each page's own clip is silent
+        from app import binaries
+
+        if not binaries.find("ffmpeg"):
+            pytest.skip("需要 ffmpeg 才能验证编码参数")
         proc = render_frames._start_encoder(tmp_path / "a.mp4", 640, 360)
         proc.stdin.close()
         proc.wait()
