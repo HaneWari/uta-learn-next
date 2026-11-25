@@ -80,7 +80,12 @@ def say(msg: str) -> None:
 
 def copy_tree(src: Path, dst: Path, ignore: tuple[str, ...] = ()) -> None:
     def _ignore(_dir, names):
-        return [n for n in names if n in ignore or n == "__pycache__"]
+        # every virtualenv, not just `.venv`: a local `uv` test environment
+        # (or anything else) must never end up in the shipped package
+        return [
+            n for n in names
+            if n in ignore or n == "__pycache__" or n.startswith(".venv")
+        ]
 
     shutil.copytree(src, dst, ignore=_ignore, dirs_exist_ok=True)
 
@@ -570,7 +575,8 @@ def main() -> int:
     base = out_root / "UtaLearnNext"
     say(f"输出目录 {base}")
 
-    copy_tree(ROOT / "backend", base / "backend", ignore=(".venv", "utalearn_backend.egg-info"))
+    copy_tree(ROOT / "backend", base / "backend",
+              ignore=("utalearn_backend.egg-info", ".pytest_cache", ".ruff_cache"))
     copy_tree(ROOT / "frontend" / "dist", base / "frontend" / "dist")
     for name in ("README.md", "LICENSE", "CHANGELOG.md", "PRIVACY.md",
                  "THIRD_PARTY_NOTICES.md"):
