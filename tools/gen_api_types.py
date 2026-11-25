@@ -59,7 +59,9 @@ def main() -> int:
         generated = HEADER + body
         if check:
             current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
-            if current != generated:
+            if _normalise(current) != _normalise(generated):
+                for line in _first_diff(_normalise(current), _normalise(generated)):
+                    print(line, file=sys.stderr)
                 print("api-types.ts 与后端 schema 不一致,请运行 "
                       "`python tools/gen_api_types.py`", file=sys.stderr)
                 return 1
@@ -71,6 +73,25 @@ def main() -> int:
     finally:
         tmp_out.unlink(missing_ok=True)
         staging.unlink(missing_ok=True)
+
+
+def _normalise(text: str) -> str:
+    """Ignore trailing whitespace and line endings when comparing.
+
+    The generator runs on Windows locally and Linux in CI; CRLF and trailing
+    spaces must not be treated as schema drift.
+    """
+    lines = [line.rstrip() for line in text.replace("\r\n", "\n").split("\n")]
+    return "\n".join(lines).strip() + "\n"
+
+
+def _first_diff(a: str, b: str) -> list[str]:
+    """A short, readable diff so a CI failure says *what* drifted."""
+    import difflib
+
+    diff = list(difflib.unified_diff(
+        a.splitlines(), b.splitlines(), "on-disk", "from-openapi", lineterm=""))
+    return diff[:40]
 
 
 if __name__ == "__main__":
