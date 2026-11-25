@@ -11,9 +11,10 @@ import base64
 import json
 import random
 import re
+import socket
 import time
 import zlib
-import socket
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from urllib.request import getproxies
 
@@ -25,35 +26,49 @@ TIMEOUT = 20
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
 
 
-_PROXY_CACHE: list[str | None] = []
+# Ports a local proxy commonly listens on. 8080/8888 are deliberately absent:
+# they are also the default of countless dev servers and printer web UIs, and
+# pointing every lyric request at a random local server breaks a direct
+# network far more often than it helps.
+AUTO_PROXY_PORTS = (7890, 7897, 10808, 1080, 8889, 4780)
 
 
-def _system_proxy() -> str | None:
-    """Pick up the proxy the app should use.
+def _probe_local_proxy() -> str | None:
+    for port in AUTO_PROXY_PORTS:
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+                return f"http://127.0.0.1:{port}"
+        except OSError:
+            continue
+    return None
+
+
+def resolve_proxy() -> str | None:
+    """The proxy to use right now, from settings + the OS environment.
 
     httpx only honours the *_PROXY env vars by default, and a Windows "system
     proxy" never sets them — so on a machine running Clash/V2Ray or a
-    corporate proxy every lyric source fails at once with a socket
-    permission error (WinError 10013). Order:
-    1. the real OS/env proxy setting, if one is configured;
-    2. well-known local proxy ports (Clash 7890/7897, V2Ray 1080, etc.) — a
-       quick connect probe, so direct networks pay no cost.
+    corporate proxy every lyric source fails at once with a socket permission
+    error (WinError 10013).
+
+    This is deliberately *not* cached: the user can switch a proxy on while the
+    app runs, and the settings page has a 测试连接 button that must reflect the
+    change immediately.
     """
-    if _PROXY_CACHE:
-        return _PROXY_CACHE[0]
+    from app import settings
+
+    mode = settings.get("proxy_mode", "auto")
+    if mode == "off":
+        return None
+    if mode == "manual":
+        return (settings.get("proxy_url") or "").strip() or None
     px = getproxies()
     env = px.get("https") or px.get("http")
-    proxy = env
-    if not proxy:
-        for port in (7890, 7897, 10808, 1080, 8889, 8888, 8080, 4780):
-            try:
-                with socket.create_connection(("127.0.0.1", port), timeout=0.25):
-                    proxy = f"http://127.0.0.1:{port}"
-                    break
-            except OSError:
-                continue
-    _PROXY_CACHE.append(proxy)
-    return proxy
+    if env:
+        return env
+    if mode == "system":
+        return None
+    return _probe_local_proxy()
 
 
 @dataclass
@@ -103,12 +118,29 @@ class QQSource:
     label = "QQ 音乐"
 
     def __init__(self) -> None:
-        self.client = httpx.Client(
-            headers={"cookie": "tmeLoginType=-1;", "content-type": "application/json",
-                     "accept-encoding": "gzip", "user-agent": "okhttp/3.14.9"},
-            http2=True, timeout=TIMEOUT, proxy=_system_proxy(),
-        )
+        self._client: httpx.Client | None = None
+        self._client_proxy: str | None = None
         self._comm: dict | None = None
+
+    @property
+    def client(self) -> httpx.Client:
+        """One pooled client, rebuilt when the proxy setting changes.
+
+        Building it at import time froze the proxy for the process lifetime, so
+        switching 代理 in 设置 did nothing until a restart.
+        """
+        proxy = resolve_proxy()
+        if self._client is None or proxy != self._client_proxy:
+            if self._client is not None:
+                self._client.close()
+            self._client = httpx.Client(
+                headers={"cookie": "tmeLoginType=-1;",
+                         "content-type": "application/json",
+                         "accept-encoding": "gzip", "user-agent": "okhttp/3.14.9"},
+                http2=True, timeout=TIMEOUT, proxy=proxy,
+            )
+            self._client_proxy = proxy
+        return self._client
 
     def _session(self) -> dict:
         if self._comm:
@@ -230,10 +262,29 @@ class KugouSource:
     label = "酷狗音乐"
 
     def __init__(self) -> None:
-        # kugou's CDN cert does not match the hostname, so verification is off
-        self.client = httpx.Client(headers={"user-agent": UA}, timeout=TIMEOUT,
-                                   follow_redirects=True, verify=False,
-                                   proxy=_system_proxy())
+        self._client: httpx.Client | None = None
+        self._client_proxy: str | None = None
+
+    @property
+    def client(self) -> httpx.Client:
+        """Verification is off for this host *only*.
+
+        `mobilecdn.kugou.com` serves a certificate that genuinely does not match
+        the hostname (verified 2026-11: `CERTIFICATE_VERIFY_FAILED: Hostname
+        mismatch`), so a verifying client cannot talk to it at all. Turning
+        verification off is limited to the two kugou API hosts that need it
+        rather than every request this app makes.
+        """
+        proxy = resolve_proxy()
+        if self._client is None or proxy != self._client_proxy:
+            if self._client is not None:
+                self._client.close()
+            self._client = httpx.Client(headers={"user-agent": UA},
+                                        timeout=TIMEOUT,
+                                        follow_redirects=True, verify=False,
+                                        proxy=proxy)
+            self._client_proxy = proxy
+        return self._client
 
     def search(self, query: str) -> list[Song]:
         url = "https://mobilecdn.kugou.com/api/v3/search/song"
@@ -315,8 +366,19 @@ class LrclibSource:
     label = "Lrclib"
 
     def __init__(self) -> None:
-        self.client = httpx.Client(headers={"user-agent": "UtaLearn/0.1"},
-                                   timeout=TIMEOUT, proxy=_system_proxy())
+        self._client: httpx.Client | None = None
+        self._client_proxy: str | None = None
+
+    @property
+    def client(self) -> httpx.Client:
+        proxy = resolve_proxy()
+        if self._client is None or proxy != self._client_proxy:
+            if self._client is not None:
+                self._client.close()
+            self._client = httpx.Client(headers={"user-agent": "UtaLearn/2.0"},
+                                        timeout=TIMEOUT, proxy=proxy)
+            self._client_proxy = proxy
+        return self._client
 
     def search(self, query: str) -> list[Song]:
         r = self.client.get("https://lrclib.net/api/search", params={"q": query})
@@ -356,15 +418,98 @@ def get_source(name: str):
     return SOURCES[name]
 
 
-def search_all(query: str, names: list[str] | None = None) -> list[dict]:
-    """Search every source; failures are reported per source, not raised."""
-    results, errors = [], []
-    for key, src in SOURCES.items():
-        if names and key not in names:
-            continue
-        try:
-            for s in src.search(query):
-                results.append(s.as_dict())
-        except Exception as e:  # noqa: BLE001
-            errors.append({"source": key, "error": str(e)})
-    return results, errors
+SEARCH_TIMEOUT = 12.0
+
+# `按来源` 排序时的固定顺序:用户在某个源上找到了习惯的版本
+SOURCE_ORDER = {"qq": 0, "kugou": 1, "lrclib": 2}
+SORT_MODES = ("duration", "char", "source")
+
+
+def _search_one(key: str, src, query: str) -> tuple[str, list[dict], str | None]:
+    try:
+        return key, [s.as_dict() for s in src.search(query)], None
+    except Exception as e:  # noqa: BLE001
+        return key, [], str(e) or e.__class__.__name__
+
+
+def search_all(query: str, names: list[str] | None = None,
+               audio_duration: float = 0.0,
+               sort: str = "duration"
+               ) -> tuple[list[dict], list[dict], dict[str, str]]:
+    """Search every source in parallel; failures are per-source, never raised.
+
+    Searially this took three round-trips (and one dead source cost the user
+    twelve seconds of a spinner before anything showed). Running them together
+    means the slowest source sets the wall clock, with an overall deadline so a
+    hung source can't hold the response forever.
+
+    Returns `(results, errors, statuses)`. `statuses` is `ok` / `empty` /
+    `error` per source so the list can show "搜索中 / 无结果 / 失败" per row.
+    """
+    wanted = {k: v for k, v in SOURCES.items() if not names or k in names}
+    results: list[dict] = []
+    errors: list[dict] = []
+    statuses: dict[str, str] = {}
+
+    if not wanted:
+        return results, errors, statuses
+
+    pool = ThreadPoolExecutor(max_workers=len(wanted), thread_name_prefix="search")
+    futures = {pool.submit(_search_one, key, src, query): key
+               for key, src in wanted.items()}
+    try:
+        done, not_done = wait(futures, timeout=SEARCH_TIMEOUT)
+        for fut in done:
+            key, hits, err = fut.result()
+            if err:
+                errors.append({"source": key, "error": err})
+                statuses[key] = "error"
+            else:
+                results.extend(hits)
+                statuses[key] = "ok" if hits else "empty"
+        for fut in not_done:
+            key = futures[fut]
+            fut.cancel()
+            errors.append({"source": key, "error": f"超时（>{SEARCH_TIMEOUT:g}s）"})
+            statuses[key] = "error"
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+    return sort_results(results, sort, audio_duration), errors, statuses
+
+
+def sort_results(results: list[dict], mode: str, audio_duration: float = 0.0) -> list[dict]:
+    """Order search hits for the config page.
+
+    * `duration` — closest to the uploaded audio first (the version that will
+      actually line up); ties prefer per-character lyrics.
+    * `char` — per-character lyrics first, then by duration distance.
+    * `source` — QQ → 酷狗 → Lrclib, closest duration inside each group.
+
+    With no uploaded audio there is nothing to match against, so `duration`
+    degrades to `char` — same rule as the settings page describes.
+    """
+    if mode not in SORT_MODES:
+        mode = "duration"
+    if mode == "duration" and audio_duration <= 0:
+        mode = "char"
+
+    def distance(r: dict) -> float:
+        if audio_duration <= 0:
+            return 0.0
+        return abs(float(r.get("duration") or 0) - audio_duration)
+
+    def char_rank(r: dict) -> int:
+        return 0 if r.get("kind") == "char" else 1
+
+    if mode == "char":
+        key = lambda r: (char_rank(r), distance(r))  # noqa: E731
+    elif mode == "source":
+        key = lambda r: (SOURCE_ORDER.get(r.get("source", ""), 9), distance(r))  # noqa: E731
+    else:
+        key = lambda r: (distance(r), char_rank(r))  # noqa: E731
+
+    ordered = sorted(results, key=key)
+    for r in ordered:
+        r["duration_match"] = bool(audio_duration > 0 and distance(r) <= 2.0)
+    return ordered

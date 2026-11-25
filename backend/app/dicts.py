@@ -51,6 +51,10 @@ YOUS = {
 
 
 def to_romaji(text: str) -> str:
+    # Katakana words (テスト, コーヒー …) come straight from UniDic's surface
+    # form when a token has no kana reading, so normalise before the table
+    # lookup — otherwise the "romaji" of a katakana word was the katakana.
+    text = kata_to_hira(text)
     out, i, n = [], 0, len(text)
     while i < n:
         two = text[i:i + 2]
@@ -73,6 +77,41 @@ def to_romaji(text: str) -> str:
         out.append(ch)
         i += 1
     return "".join(out)
+
+
+MACRONS = {"a": "ā", "i": "ī", "u": "ū", "e": "ē", "o": "ō"}
+
+
+def restyle_long_vowel(romaji: str, style: str = "ou") -> str:
+    """Rewrite long vowels: `toukyou` → `tōkyō` (macron) / `tookyoo` (oo).
+
+    The kana reading is the source of truth, and `ou` is how it is spelled, so
+    both alternatives are a pure rewrite of that string rather than a second
+    reading of the kana. `ou` (the default) returns the input untouched.
+    """
+    if style == "ou" or not romaji:
+        return romaji
+    out: list[str] = []
+    i = 0
+    while i < len(romaji):
+        ch = romaji[i]
+        nxt = romaji[i + 1] if i + 1 < len(romaji) else ""
+        if ch in "aeiou" and nxt == "u" and i + 1 < len(romaji):
+            if style == "macron":
+                out.append(MACRONS[ch])
+            else:                       # "oo"
+                out.append("oo" if ch == "o" else ch * 2)
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+# Particles are written with their grammatical kana but sung with a different
+# sound: は = "wa", へ = "e", を = "o". Both spellings are kept so the reader
+# can choose 按发音 (default) or 按字面 in 设置.
+PARTICLE_PRON = {"は": "わ", "へ": "え", "を": "お"}
 
 
 def kata_to_hira(s: str) -> str:
@@ -194,7 +233,19 @@ def enrich(tokens: list[dict]) -> list[dict]:
                 # 逃げる / にげる instead of the inflected 逃げ / にげ
                 if entry.get("k"):
                     t["lemma_kana"] = entry["k"]
-        t["romaji"] = to_romaji(t["kana"] or t["surface"])
+        # Two readings, decided by a setting on the *frontend* so switching
+        # 助词读法 never requires regenerating a song:
+        #   `kana`  = literal spelling  (は → ha)
+        #   `pron`  = how it is sung    (は → wa, only for particles)
+        # `romaji` keeps the pronunciation form for older data and exports.
+        literal = t["kana"] or t["surface"]
+        pron = t["kana"] or t["surface"]
+        if t["pos1"] == "助詞" and pron in PARTICLE_PRON:
+            pron = PARTICLE_PRON[pron]
+        t["kana_literal"] = literal
+        t["pron"] = pron
+        t["romaji"] = to_romaji(pron)
+        t["romaji_literal"] = to_romaji(literal)
     return tokens
 
 
@@ -440,7 +491,7 @@ def apply_reading_marks(text: str, tokens: list[dict],
         total = sum(weights)
         units = [c for c in kana if not is_punct(c)]
         pos = 0
-        for t, w in zip(hit, weights):
+        for t, w in zip(hit, weights, strict=False):
             n = max(1, round(len(units) * w / total)) if pos < len(units) else 0
             part = units[pos:pos + n] if pos < len(units) else []
             pos += n

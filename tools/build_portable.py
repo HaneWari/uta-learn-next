@@ -19,45 +19,53 @@ Usage:
   python tools/build_portable.py --no-chromium   # core zip only
   python tools/build_portable.py --custom-pack   # only the custom-lyrics extension zip
   python tools/build_portable.py --no-zip        # just the folder
+  python tools/build_portable.py --ci            # folder only, no chromium (CI smoke)
   python tools/build_portable.py --out D:/x      # build elsewhere (space!)
   python tools/build_portable.py --ffmpeg-dir C:/ffmpeg/bin
+
+Python deps come from `backend/requirements.lock` (uv export, hashes pinned), so
+the same lock always installs the same wheels. Download inputs are pinned in
+`tools/build_manifest.json`; a hash mismatch aborts the build.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
 import urllib.request
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = "1.3.0"
 
-PY_VERSION = "3.13.2"
-PY_ZIP = f"https://www.python.org/ftp/python/{PY_VERSION}/python-{PY_VERSION}-embed-amd64.zip"
-GET_PIP = "https://bootstrap.pypa.io/get-pip.py"
+
+def _app_version() -> str:
+    src = (ROOT / "backend" / "app" / "version.py").read_text(encoding="utf-8")
+    m = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', src)
+    if not m:
+        raise SystemExit("backend/app/version.py 里找不到 APP_VERSION")
+    return m.group(1)
+
+
+MANIFEST = json.loads((ROOT / "tools" / "build_manifest.json").read_text(encoding="utf-8"))
+VERSION = _app_version()
+
+PY_VERSION = MANIFEST["python"]["version"]
+PY_ZIP = MANIFEST["python"]["url"]
+PY_ZIP_SHA = MANIFEST["python"]["sha256"]
+GET_PIP = MANIFEST["get_pip"]["url"]
+GET_PIP_SHA = MANIFEST["get_pip"]["sha256"]
 # "essentials" is ~1/3 the size of the full build and still has libx264 + aac +
 # the common audio decoders and the fps/setpts/tpad filters this app needs.
-FFMPEG_ZIP = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-
-REQUIREMENTS = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.30",
-    "python-multipart>=0.0.9",
-    "httpx[http2]>=0.27",
-    "numpy>=1.26",
-    "pillow>=10.0",
-    "fugashi>=1.3",
-    "unidic-lite>=1.0",
-    "faster-whisper>=1.0",
-    # ja-zh lyric translation runs on a bundled int8 CT2 model; we only need
-    # sentencepiece for the .spm tokenisers, not the full transformers stack.
-    "sentencepiece>=0.2",
-    "playwright>=1.44",
-]
+FFMPEG_ZIP = MANIFEST["ffmpeg"]["url"]
+FFMPEG_SHA = MANIFEST["ffmpeg"].get("sha256")
+REQUIREMENTS_LOCK = ROOT / "backend" / "requirements.lock"
 
 
 def say(msg: str) -> None:
@@ -71,14 +79,30 @@ def copy_tree(src: Path, dst: Path, ignore: tuple[str, ...] = ()) -> None:
     shutil.copytree(src, dst, ignore=_ignore, dirs_exist_ok=True)
 
 
-def download(url: str, dest: Path) -> Path:
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def download(url: str, dest: Path, sha256: str | None = None) -> Path:
     if dest.exists() and dest.stat().st_size > 0:
-        say(f"已缓存 {dest.name}")
-        return dest
+        if sha256 is None or sha256_file(dest) == sha256:
+            say(f"已缓存 {dest.name}")
+            return dest
+        say(f"{dest.name} 哈希不符，重新下载")
+        dest.unlink()
     say(f"下载 {dest.name} …")
     dest.parent.mkdir(parents=True, exist_ok=True)
     with urllib.request.urlopen(url, timeout=300) as r, dest.open("wb") as fh:
         shutil.copyfileobj(r, fh)
+    if sha256:
+        got = sha256_file(dest)
+        if got != sha256:
+            dest.unlink(missing_ok=True)
+            raise SystemExit(f"{dest.name} SHA256 不符：期望 {sha256}，实际 {got}")
     return dest
 
 
@@ -88,7 +112,7 @@ def build_python(base: Path) -> Path:
         say("python/ 已存在，跳过")
         return py
     py.mkdir(parents=True, exist_ok=True)
-    zpath = download(PY_ZIP, base.parent / "cache" / "python-embed.zip")
+    zpath = download(PY_ZIP, base.parent / "cache" / "python-embed.zip", PY_ZIP_SHA)
     with zipfile.ZipFile(zpath) as z:
         z.extractall(py)
 
@@ -109,16 +133,23 @@ def install_packages(py: Path, base: Path) -> None:
     if (py / "Lib" / "site-packages" / "fastapi").exists():
         say("依赖已安装，跳过")
         return
-    pip_boot = download(GET_PIP, base.parent / "cache" / "get-pip.py")
+    if not REQUIREMENTS_LOCK.exists():
+        raise SystemExit(
+            f"缺少 {REQUIREMENTS_LOCK}。先运行：\n"
+            "  cd backend && uv lock && uv export --frozen --no-dev "
+            "--extra speech --extra export --no-emit-project --format requirements-txt "
+            "--hashes -o requirements.lock")
+    pip_boot = download(GET_PIP, base.parent / "cache" / "get-pip.py", GET_PIP_SHA)
     say("安装 pip …")
     subprocess.run([str(exe), str(pip_boot), "--no-warn-script-location", "-q"], check=True)
     # unidic-lite ships as sdist only, so the embedded interpreter needs a
     # build backend (setuptools+wheel) before the real deps can compile
     subprocess.run([str(exe), "-m", "pip", "install", "-q",
                     "--no-warn-script-location", "setuptools", "wheel"], check=True)
-    say(f"安装依赖（{len(REQUIREMENTS)} 个包，几分钟）…")
+    say("安装依赖（requirements.lock，逐包哈希校验，几分钟）…")
     subprocess.run([str(exe), "-m", "pip", "install", "-q",
-                    "--no-warn-script-location", *REQUIREMENTS], check=True)
+                    "--no-warn-script-location", "--require-hashes",
+                    "-r", str(REQUIREMENTS_LOCK)], check=True)
 
 
 def fetch_ffmpeg(base: Path, explicit: Path | None) -> Path:
@@ -140,7 +171,8 @@ def fetch_ffmpeg(base: Path, explicit: Path | None) -> Path:
         say(f"已从 {explicit} 复制 ffmpeg")
         return bin_dir
 
-    zpath = download(FFMPEG_ZIP, base.parent / "cache" / "ffmpeg-essentials.zip")
+    zpath = download(
+        FFMPEG_ZIP, base.parent / "cache" / "ffmpeg-essentials.zip", FFMPEG_SHA)
     say("解压 ffmpeg（精简版）…")
     with zipfile.ZipFile(zpath) as z:
         for member in z.namelist():
@@ -173,6 +205,56 @@ def install_chromium(py: Path, base: Path, dest: Path | None = None) -> Path:
                     "chromium", "ffmpeg"],
                    check=True, env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": str(browsers)})
     return browsers
+
+
+def ffmpeg_version(bin_dir: Path) -> str:
+    try:
+        out = subprocess.run(
+            [str(bin_dir / "ffmpeg.exe"), "-version"],
+            capture_output=True, text=True, timeout=15, check=False)
+        return (out.stdout.splitlines() or ["unknown"])[0].strip()
+    except OSError:
+        return "unknown"
+
+
+def compute_runtime_id(ffmpeg_ver: str) -> tuple[str, str]:
+    """Hash every input that can change native/runtime behaviour.
+
+    Two builds with the same interpreter, dependency lock and ffmpeg binary
+    produce the same id even on different days, so an update can tell "same
+    runtime, only code changed" from "ship the whole runtime again".
+    """
+    req_sha = sha256_file(REQUIREMENTS_LOCK) if REQUIREMENTS_LOCK.exists() else "missing"
+    digest = hashlib.sha256()
+    digest.update(f"python={PY_VERSION}\n".encode())
+    digest.update(f"requirements={req_sha}\n".encode())
+    digest.update(f"ffmpeg={ffmpeg_ver}\n".encode())
+    return digest.hexdigest(), req_sha
+
+
+def write_build_info(base: Path, ffmpeg_ver: str) -> dict:
+    runtime_id, req_sha = compute_runtime_id(ffmpeg_ver)
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
+            capture_output=True, text=True, timeout=15, check=False
+        ).stdout.strip() or "unknown"
+    except OSError:
+        commit = "unknown"
+    info = {
+        "app": "UtaLearn Next",
+        "version": VERSION,
+        "commit": commit,
+        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "runtime_id": runtime_id,
+        "python": PY_VERSION,
+        "requirements_sha256": req_sha,
+        "ffmpeg": ffmpeg_ver,
+    }
+    (base / "BUILD_INFO.json").write_text(
+        json.dumps(info, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    say(f"BUILD_INFO.json runtime_id={runtime_id[:12]}…")
+    return info
 
 
 LAUNCHER_LINES = [
@@ -391,7 +473,13 @@ def main() -> int:
     ap.add_argument("--browsers-dir", default=None, help="Chromium 安装位置（默认构建目录旁）")
     ap.add_argument("--custom-pack", action="store_true",
                     help="只生成自定义歌词扩展包 whisper+翻译（版本无关，一次构建长期复用）")
+    ap.add_argument("--ci", action="store_true",
+                    help="CI 冒烟：只生成目录，不装 Chromium、不打 zip")
     args = ap.parse_args()
+
+    if args.ci:
+        args.no_chromium = True
+        args.no_zip = True
 
     if args.custom_pack:
         zip_root = Path(args.zip_out).resolve() if args.zip_out else Path(args.out).resolve()
@@ -414,7 +502,8 @@ def main() -> int:
 
     py = build_python(base)
     install_packages(py, base)
-    fetch_ffmpeg(base, Path(args.ffmpeg_dir) if args.ffmpeg_dir else None)
+    bin_dir = fetch_ffmpeg(base, Path(args.ffmpeg_dir) if args.ffmpeg_dir else None)
+    write_build_info(base, ffmpeg_version(bin_dir))
     write_launcher(base)
 
     size = sum(f.stat().st_size for f in base.rglob("*") if f.is_file()) / 1048576

@@ -11,6 +11,7 @@ needs only `sentencepiece` on top of `ctranslate2` — no `transformers`.
 """
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 MODEL_DIRNAME = "translate-ja-zh"
@@ -35,19 +36,28 @@ def _missing_msg() -> str:
     )
 
 
+_LOAD_LOCK = threading.Lock()
+
+
 def _load():
     global _translator, _sp_source, _sp_target
     if _translator is not None:
         return _translator, _sp_source, _sp_target
-    root = _model_dir()
-    if not installed():
-        raise RuntimeError(_missing_msg())
-    from ctranslate2 import Translator
-    from sentencepiece import SentencePieceProcessor
+    # Two builds can finish at once (a retry plus the original). Without the
+    # lock both loaded a 200 MB model and one was thrown away — the kind of
+    # waste that turns into an OOM on a small laptop.
+    with _LOAD_LOCK:
+        if _translator is not None:
+            return _translator, _sp_source, _sp_target
+        root = _model_dir()
+        if not installed():
+            raise RuntimeError(_missing_msg())
+        from ctranslate2 import Translator
+        from sentencepiece import SentencePieceProcessor
 
-    _translator = Translator(str(root), device="cpu", compute_type="int8")
-    _sp_source = SentencePieceProcessor(model_file=str(root / "source.spm"))
-    _sp_target = SentencePieceProcessor(model_file=str(root / "target.spm"))
+        _translator = Translator(str(root), device="cpu", compute_type="int8")
+        _sp_source = SentencePieceProcessor(model_file=str(root / "source.spm"))
+        _sp_target = SentencePieceProcessor(model_file=str(root / "target.spm"))
     return _translator, _sp_source, _sp_target
 
 

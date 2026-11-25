@@ -9,7 +9,6 @@
 python tools/build_dict.py          # 重新生成 jadict.json
 python tools/build_grammar.py       # 重新生成 grammar.json
 python tools/backfill_glosses.py    # 给已有数据集补释义（默认演练，加 --apply 才写）
-python tools/check_retime.py        # 重对时拟合的合成回归检查
 ```
 
 ## 词典数据源
@@ -45,12 +44,6 @@ Development Group，CC BY-SA）。`jadict.json` 是这些数据的衍生作品�
 
 ## 回归检查
 
-`check_retime.py` 用合成锚点验证 `backend/app/retime.py` 的拟合行为，覆盖：
-
-- 真 `b = 1`（剪掉片头）必须还原成纯偏移
-- 真速度差 ±1.0% / ±1.6% 必须保留斜率
-- 亚阈值速度差（0.5%）被**有意**忽略
-- ±0.6s 锚点噪声、3 个离群锚点
-- 锚点不足 / 斜率越界时拒绝拟合
-
-期望输出结尾是 `ALL PASS`。
+后端逻辑的回归检查已经并入 `backend/tests/`（`python -m pytest`，从 `backend/`
+目录运行）。`check_export_sync.py` 仍然保留，用于核对导出视频与歌词时间轴是否
+同步，需要真实导出产物。

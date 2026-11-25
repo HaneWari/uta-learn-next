@@ -16,10 +16,18 @@ line is annotated with the grammar patterns it contains.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from .dicts import analyze, enrich, find_grammar, is_content, is_punct, mora_count
-from .dicts import apply_reading_marks, parse_reading_marks
+from .dicts import (
+    analyze,
+    apply_reading_marks,
+    enrich,
+    find_grammar,
+    is_content,
+    is_punct,
+    mora_count,
+    parse_reading_marks,
+)
 from .sources import ParsedLyrics
 
 PUNCT = set(" \u3000\t、。,.!?！？…「」『』()（）・~〜-—–:;\"'’“”　")
@@ -119,7 +127,7 @@ def _times_by_mora(text: str, start: float, end: float,
 
     times: list[tuple[float, float] | None] = [None] * len(text)
     cursor = start
-    for tok, w in zip(tokens, weights):
+    for tok, w in zip(tokens, weights, strict=False):
         span = span_all * w / total
         a = cursor
         cursor += span
@@ -220,7 +228,6 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
             seg_chars = chars[t["start"]:t["end"]]
             if not seg_chars:
                 continue
-            surface = t["surface"]
             w = _word_entry(t, seg_chars)
             words.append(w)
 
@@ -249,7 +256,7 @@ def build(parsed: ParsedLyrics, meta: dict, offset: float = 0.0,
         "meta": {
             "language": "ja",
             "duration_seconds": round(duration, 2),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             **meta,
         },
         "segments": segments,
@@ -319,17 +326,6 @@ def retime_words(text: str, start: float, end: float,
         if seg_chars:
             words.append(_word_entry(t, seg_chars))
     return words
-
-
-def from_plain_lines(lines: list[str], meta: dict,
-                     translation: list[tuple[float, str]] | None = None) -> dict:
-    """Build from bare text lines (used when only the words are known)."""
-    parsed_lines = []
-    for i, ln in enumerate(lines):
-        parsed_lines.append({"start": float(i) * 4.0, "end": float(i) * 4.0 + 3.6,
-                             "units": [(ln, float(i) * 4.0, float(i) * 4.0 + 3.6)]})
-    return build(ParsedLyrics(lines=parsed_lines, translation=translation or [],
-                             kind="line"), meta)
 
 
 def slugify(text: str, fallback: str = "song") -> str:

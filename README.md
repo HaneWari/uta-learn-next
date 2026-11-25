@@ -92,10 +92,6 @@ cd backend && python -m uvicorn main:app --reload --port 8000   # 后端热重�
 cd frontend && npm run dev                                       # 前端 vite 开发服
 ```
 
-```bash
-docker compose up --build                                        # 或者直接用 Docker
-```
-
 </details>
 
 <details>

@@ -11,14 +11,15 @@ Two things make the output line up with its audio:
 """
 from __future__ import annotations
 
-from . import binaries
-
 import os
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import quote
+
+from . import binaries
 
 W, H = 1920, 1080
 FPS = 60
@@ -135,18 +136,6 @@ def _chrome(pw=None) -> str | None:
     """First existing candidate — kept for callers that just need *a* path."""
     c = _chrome_candidates(pw)
     return c[0] if c else None
-
-
-def available() -> tuple[bool, str]:
-    """(can export, why not) — thin wrapper over env_check for the export job."""
-    c = env_check()
-    if c["ok"]:
-        return True, ""
-    return False, {
-        "no_playwright": "没有安装 playwright（python -m pip install playwright）",
-        "no_browser": "没找到可用的 Chromium 内核浏览器（Chrome / Edge / Brave / 其他均可）",
-        "no_ffmpeg": "没找到 ffmpeg",
-    }.get(c["state"], "导出环境不可用")
 
 
 def _has_bundled_chromium() -> bool:
@@ -331,7 +320,7 @@ def env_check() -> dict:
 BAR_LO, BAR_HI = 0.035, 0.968
 
 
-def _grab(video: Path, t: float, out: Path) -> "object":
+def _grab(video: Path, t: float, out: Path) -> object:
     import numpy as np
     from PIL import Image
 
@@ -436,7 +425,10 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
 
     out.parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="utaexport_"))
-    url = f"{base_url}/?song={song}&render=1{extra_query}"
+    # Quote the name: a title like "Q&A" or "#1" (both survive slugify) would
+    # otherwise become a query separator or a fragment and the recorder would
+    # open the wrong song — or an empty stage.
+    url = f"{base_url}/?song={quote(song, safe='')}&render=1{extra_query}"
 
     try:
         p(0.02, "启动浏览器…")

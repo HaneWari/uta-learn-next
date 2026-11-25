@@ -26,21 +26,27 @@ pipeline: ~1.6 s).
 """
 from __future__ import annotations
 
-from . import binaries
-
 import os
 import re
 import subprocess
 import tempfile
 import unicodedata
 import wave
+from datetime import UTC
 from pathlib import Path
 
 import numpy as np
 
+from . import binaries
 from .builder import _prefer_kana_lemma
-from .dicts import (analyze, apply_reading_marks, enrich, find_grammar,
-                    is_content, parse_reading_marks)
+from .dicts import (
+    analyze,
+    apply_reading_marks,
+    enrich,
+    find_grammar,
+    is_content,
+    parse_reading_marks,
+)
 
 PUNCT_RE = re.compile(r"[\s、。,.!?！？…「」『』()（）・~〜\-—:;\"'’“”]")
 JP_RE = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff]")
@@ -64,8 +70,18 @@ ANCHOR_GAP = 4.0
 # audio
 # --------------------------------------------------------------------------- #
 def to_wav(src: str | Path, dst: str | Path | None = None) -> Path:
-    """Decode anything ffmpeg reads into 16 kHz mono 16-bit PCM."""
-    dst = Path(dst) if dst else Path(tempfile.gettempdir()) / f"utalearn_{os.getpid()}.wav"
+    """Decode anything ffmpeg reads into 16 kHz mono 16-bit PCM.
+
+    With no `dst` a unique file is created: the old `utalearn_{pid}.wav` name
+    meant two custom-lyrics jobs in one process (they are serialised per cpu,
+    but an export or a retry can overlap) silently overwrote each other's
+    audio and aligned the wrong song.
+    """
+    if dst is None:
+        fd, name = tempfile.mkstemp(prefix="utalearn-", suffix=".wav")
+        os.close(fd)
+        dst = Path(name)
+    dst = Path(dst)
     cmd = [binaries.ffmpeg(), "-y", "-v", "error", "-i", str(src),
            "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", str(dst)]
     subprocess.run(cmd, check=True, capture_output=True)
@@ -144,25 +160,6 @@ def _decode(model, x: np.ndarray):
         x, language="ja", word_timestamps=True, vad_filter=False, beam_size=5,
         condition_on_previous_text=False)
     return segs
-
-
-def _transcribe(x: np.ndarray, progress) -> list[dict]:
-    """Whole-track transcription as whisper segments (used by the retime fit).
-
-    Passing the array (rather than a path) keeps faster-whisper away from PyAV's
-    ``av.open(..., metadata_errors=...)``, which older PyAV builds reject.
-    """
-    def work(model):
-        progress(0.18, "识别歌声…")
-        out = []
-        for s in _decode(model, x):
-            words = [{"w": w.word, "s": round(w.start, 3), "e": round(w.end, 3)}
-                     for w in (s.words or []) if w.end > w.start]
-            out.append({"start": round(s.start, 3), "end": round(s.end, 3),
-                        "text": s.text.strip(), "words": words})
-        return out
-
-    return _run_whisper(progress, work)[0]
 
 
 def _chunk_starts(duration: float) -> list[float]:
@@ -264,66 +261,12 @@ def _model_attempts() -> list[tuple[str | Path, str, str]]:
 
 
 # --------------------------------------------------------------------------- #
-# text helpers (also used by the retime fit)
+# text helpers
 # --------------------------------------------------------------------------- #
 def norm(s: str) -> str:
     s = unicodedata.normalize("NFKC", s)
     s = "".join(chr(ord(c) - 0x60) if 0x30A1 <= ord(c) <= 0x30F6 else c for c in s)
     return PUNCT_RE.sub("", s)
-
-
-def lcs_ratio(a: str, b: str) -> float:
-    if not a or not b or len(a) > 240 or len(b) > 240:
-        return 0.0
-    lb = len(b)
-    prev = [0] * (lb + 1)
-    for i in range(1, len(a) + 1):
-        cur = [0] * (lb + 1)
-        ca = a[i - 1]
-        for j in range(1, lb + 1):
-            cur[j] = prev[j - 1] + 1 if ca == b[j - 1] else max(prev[j], cur[j - 1])
-        prev = cur
-    return prev[lb] / max(len(a), lb)
-
-
-def align(lines: list[str], wsegs: list[dict]) -> list[dict | None]:
-    """Global monotonic DP; returns one whisper segment (or None) per line."""
-    n, m = len(lines), len(wsegs)
-    lyr = [norm(x) for x in lines]
-    seg = [norm(s["text"]) for s in wsegs]
-
-    NEG = -1e9
-    dp = [[NEG] * (m + 1) for _ in range(n + 1)]
-    back = [[None] * (m + 1) for _ in range(n + 1)]
-    for j in range(m + 1):
-        dp[0][j] = 0.0
-    for i in range(1, n + 1):
-        dp[i][0] = dp[i - 1][0]
-        back[i][0] = ("skip", 0)
-        for j in range(1, m + 1):
-            best, how = dp[i - 1][j], ("skip", 0)
-            if dp[i][j - 1] > best:
-                best, how = dp[i][j - 1], ("seg", 0)
-            take = dp[i - 1][j - 1] + lcs_ratio(lyr[i - 1], seg[j - 1]) - MATCH_BONUS
-            if take > best:
-                best, how = take, ("take", 0)
-            dp[i][j] = best
-            back[i][j] = how
-
-    out: list[dict | None] = [None] * n
-    i, j = n, m
-    while i > 0 and j >= 0:
-        how = back[i][j]
-        if how is None:
-            break
-        if how[0] == "take":
-            out[i - 1] = wsegs[j - 1]
-            i, j = i - 1, j - 1
-        elif how[0] == "skip":
-            i -= 1
-        else:
-            j -= 1
-    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -485,7 +428,7 @@ def _line_times(line_kana: list[str], rows, audio_end: float,
         r = min(MAX_RATE, max(MIN_RATE, r))
         for p in range(a):
             t[p] = max(prev_end + 0.05 * (p + 1), t[a] - (a - p) * r)
-        for x, y in zip(hits, hits[1:]):
+        for x, y in zip(hits, hits[1:], strict=False):
             for p in range(x + 1, y):
                 t[p] = t[x] + (t[y] - t[x]) * (p - x) / (y - x)
         for p in range(b + 1, n):
@@ -520,7 +463,7 @@ def _line_times(line_kana: list[str], rows, audio_end: float,
             t1 = t0 + FIRST_WORD_CAP * tot if clip_tail else min(
                 max(audio_end, t0), t0 + FIRST_WORD_CAP * tot)
         cur = t0
-        for k, nk in zip(range(li, j), sizes):
+        for k, nk in zip(range(li, j), sizes, strict=False):
             span = max(0.0, t1 - t0) * nk / tot
             out[k] = ([cur + span * q / nk for q in range(nk)], cur, cur + span, 0.0)
             cur += span
@@ -541,7 +484,7 @@ def _assign_times(text: str, tokens: list[dict], kls: list[int],
     times: list[tuple[float, float] | None] = [None] * len(text)
     n = len(t)
     p = 0
-    for tok, kl in zip(tokens, kls):
+    for tok, kl in zip(tokens, kls, strict=False):
         a = t[p] if p < n else end
         if kl == 0:
             b = min(a + 0.05, max(a, end))
@@ -643,7 +586,7 @@ def build_from_audio(audio: str | Path, lines: list[str], meta: dict,
     timed = _line_times(kana, rows, song_end, clip_tail=lo > 0)
 
     segments = []
-    for (text, tokens, kls), (t, _start, end, cov) in zip(prepared, timed):
+    for (text, tokens, kls), (t, _start, end, cov) in zip(prepared, timed, strict=False):
         times = _assign_times(text, tokens, kls, t, end)
         enrich(tokens)
         # Grammar first: a word that sits inside a detected pattern is grammar
@@ -654,8 +597,8 @@ def build_from_audio(audio: str | Path, lines: list[str], meta: dict,
         grammar = find_grammar(text, tokens)
         gspans = [(g["at"], g["at"] + len(g["matched"])) for g in grammar]
 
-        def _in_grammar(tok: dict) -> bool:
-            return any(tok["start"] < b and a < tok["end"] for a, b in gspans)
+        def _in_grammar(tok: dict, spans=gspans) -> bool:
+            return any(tok["start"] < b and a < tok["end"] for a, b in spans)
 
         out_words = []
         for tk in tokens:
@@ -703,7 +646,7 @@ def build_from_audio(audio: str | Path, lines: list[str], meta: dict,
     # A line's extrapolated head may reach back past where the previous line's
     # tail was extrapolated to; end the earlier line there so two lines never
     # claim the same instant.
-    for cur, nxt in zip(segments, segments[1:]):
+    for cur, nxt in zip(segments, segments[1:], strict=False):
         cut = nxt["start"]
         if cur["end"] <= cut:
             continue
@@ -729,5 +672,5 @@ def build_from_audio(audio: str | Path, lines: list[str], meta: dict,
 
 
 def _now() -> str:
-    from datetime import datetime, timezone
-    return datetime.now(timezone.utc).isoformat()
+    from datetime import datetime
+    return datetime.now(UTC).isoformat()

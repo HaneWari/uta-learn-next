@@ -1,0 +1,18 @@
+name = "uta-learn-next-stats"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# Custom domain, not *.workers.dev: workers.dev is effectively unreachable from
+# mainland China, which would bias the counts toward VPN users.
+routes = [
+  { pattern = "stats.kibicloud.top/v1/ping", custom_domain = true }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "uta-learn-next-stats"
+database_id = "<create with: wrangler d1 create uta-learn-next-stats>"
+
+[observability]
+# request logs stay off on purpose: the worker must not record who pinged
+enabled = false
