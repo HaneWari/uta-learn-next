@@ -9,6 +9,8 @@ import { ShortcutHelp } from "./ShortcutHelp";
 import { WordPopover } from "./WordPopover";
 import type { WordHit } from "./WordPopover";
 import { LyricsRail } from "./LyricsRail";
+import { useViewStore } from "../store/viewStore";
+import type { LayerKey } from "../store/viewStore";
 import { Player } from "./Player";
 import { LyricsDisplay } from "./LyricsDisplay";
 import { VocabCards } from "./VocabCards";
@@ -58,20 +60,25 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
      layer set than the stage. The export page still accepts URL overrides
      because its recorder profile has no access to the dataset's own state. */
   const view = songData.meta.view ?? {};
-  const [viewChoice, setViewChoice] = useState<Record<string, boolean>>({});
   const url = new URLSearchParams(window.location.search);
   const urlFlag = (name: string) => {
     const q = url.get(name);
     return q === null ? undefined : q === "1";
   };
-  const layerHidden = (key: string, urlName: string): boolean => {
-    // priority: this session's click → URL (recorder) → dataset → visible
-    if (key in viewChoice) return viewChoice[key];
+  // the session state lives in the store now (§5.7); the priority order is
+  // unchanged: this session's click → URL (recorder) → dataset → visible
+  const storeHidden = useViewStore((s) => s.hidden);
+  const toggleLayer = useViewStore((s) => s.toggle);
+  const resetForSong = useViewStore((s) => s.resetForSong);
+  useEffect(() => {
+    resetForSong(song);
+  }, [song, resetForSong]);
+
+  const layerHidden = (key: LayerKey, urlName: string): boolean => {
     const fromUrl = urlFlag(urlName);
     if (fromUrl !== undefined) return fromUrl;
-    return view[key] === false;
+    return storeHidden(song, key, view[key] === false);
   };
-
   const cardsHidden = layerHidden("cards", "hidecards");
   const transHidden =
     layerHidden("translation", "hidetrans") || !!songData.meta.trans_hidden;
@@ -88,17 +95,15 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
 
   // plain functions: they read the refs above, so the keyboard listener stays
   // stable without the memoisation the compiler could not preserve
-  const toggleCards = () => {
-    const next = !cardsHiddenRef.current;
-    setViewChoice((prev) => ({ ...prev, cards: next }));
-    onPatchView?.({ cards: !next });
-  };
+const toggleCards = () => {
+  const next = toggleLayer(song, "cards", cardsHiddenRef.current);
+  onPatchView?.({ cards: !next });
+};
 
-  const toggleTrans = () => {
-    const next = !transHiddenRef.current;
-    setViewChoice((prev) => ({ ...prev, translation: next }));
-    onPatchTrans?.(next);
-  };
+const toggleTrans = () => {
+  const next = toggleLayer(song, "translation", transHiddenRef.current);
+  onPatchTrans?.(next);
+};
   // hidden lines are left in the dataset but skipped everywhere the timeline
   // is consumed — the sync engine, the lyric display and the vocab row all
   // see the same filtered segment list, so a removed line just never plays.
@@ -117,8 +122,10 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
   const playback = usePlayback(audioRef, visibleSegments);
   const [helpOpen, setHelpOpen] = useState(false);
   const [wordHit, setWordHit] = useState<WordHit | null>(null);
-  /* the whole-song rail is off by default: the stage stays clean unless asked */
-  const [railOpen, setRailOpen] = useState(false);
+  // the whole-song rail is off by default (the stage stays clean), and the
+  // store lets the shortcut and the rail button agree
+  const railOpen = useViewStore((s) => s.railOpen);
+  const setRailOpen = useViewStore((s) => s.setRail);
 
   // A plain function, refreshed every render through a ref: the keyboard
   // listener then reads the *current* closure without being rebuilt, and the
@@ -293,7 +300,7 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
                 ? undefined
                 : (key) => {
                     const next = layerHidden(key, LAYER_URL[key]);
-                    setViewChoice((prev) => ({ ...prev, [key]: next }));
+                    toggleLayer(song, key as LayerKey, next);
                     onPatchView?.({ [key]: !next });
                   }
             }
@@ -315,7 +322,7 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
           segments={visibleSegments}
           activeId={visibleSegments[syncState.displayIndex]?.id ?? null}
           open={railOpen}
-          onToggle={() => setRailOpen((v) => !v)}
+          onToggle={() => setRailOpen(!railOpen)}
           onSeek={(seg) => {
             const a = audioRef.current;
             if (a) {
