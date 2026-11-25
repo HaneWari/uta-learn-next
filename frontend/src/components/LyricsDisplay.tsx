@@ -27,6 +27,14 @@ interface LyricsDisplayProps {
   song?: string;
   /** per-song display layers (furigana / romaji / next line) */
   layers?: { showFurigana?: boolean; showRomaji?: boolean; showNext?: boolean };
+  /** 5.3.3: move this line ±0.1 s against the audio (global offset stays) */
+  onNudgeLine?: (segmentId: number, delta: number) => void;
+  /** 5.3.3: re-align only this line (needs the whisper pack) */
+  onRealign?: (segmentId: number) => void;
+  /** false when the custom-lyrics pack is missing; the button greys out */
+  canRealign?: boolean;
+  /** 点击歌词行空白处跳到这一行开头播放 (§5.2.2) */
+  onSeekLine?: (segment: Segment) => void;
 }
 
 /** The text the listener actually sees: the override wins over the aligned
@@ -206,7 +214,7 @@ function NextLine({ segment, showFurigana = true }: { segment: Segment; showFuri
   );
 }
 
-export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false, onWordClick, song, layers }: LyricsDisplayProps) {
+export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false, onWordClick, song, layers, onNudgeLine, onRealign, canRealign = false, onSeekLine }: LyricsDisplayProps) {
   const [settings] = useSettings();
   // the three presentation layers are per-song switches in `meta.view`;
   // the shell passes them down so a change is visible without a reload
@@ -351,6 +359,13 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
           "--chars": shownText(cur).replace(/\s/g, "").length || 1,
         } as CSSProperties}
         onDoubleClick={startEdit}
+        onClick={(e) => {
+          // a click that did not land on a word means "jump to this line";
+          // a word has its own handler and stops propagation
+          if (editing) return;
+          if ((e.target as HTMLElement).closest(".wordbox")) return;
+          onSeekLine?.(cur);
+        }}
       >
         {editing ? (
           <div className="lyr-edit">
@@ -371,6 +386,43 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
               回车或点击空白保存 · Esc 取消 · 改读音写作 <code>[汉字](读音)</code>
               ，如 <code>[明日](あす)</code>，假名/片假名/罗马音均可
             </span>
+
+            <div className="lyr-tools">
+              <span className="lyr-tool-label">本行时间</span>
+              <button
+                type="button"
+                className="lyr-nudge"
+                onClick={() => onNudgeLine?.(cur.id, -0.1)}
+                title="这一行整体提前 0.1 秒"
+              >
+                -0.1s
+              </button>
+              <span className="lyr-offset">
+                {(cur.line_offset ?? 0) > 0 ? "+" : ""}
+                {(cur.line_offset ?? 0).toFixed(1)}s
+              </span>
+              <button
+                type="button"
+                className="lyr-nudge"
+                onClick={() => onNudgeLine?.(cur.id, 0.1)}
+                title="这一行整体延后 0.1 秒"
+              >
+                +0.1s
+              </button>
+              <button
+                type="button"
+                className="lyr-realign"
+                onClick={() => onRealign?.(cur.id)}
+                disabled={!canRealign}
+                title={
+                  canRealign
+                    ? "只对这条前后 5 秒重新识别并对齐"
+                    : "需要自定义歌词扩展包(whisper)"
+                }
+              >
+                重新对齐本行
+              </button>
+            </div>
           </div>
         ) : (
           <>

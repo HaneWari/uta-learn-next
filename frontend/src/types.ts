@@ -50,6 +50,9 @@ export interface Segment {
   /** user hid this lyric line — it stays in the dataset but is skipped on
       stage and in the video export */
   hidden?: boolean;
+  /** this line's own offset against the audio, on top of `meta.time_offset`;
+      set by 逐行微调 (§5.3.3) */
+  line_offset?: number;
   /** stage edits to the sung line + its Chinese gloss, layered over the raw
       text so clearing a field never destroys the aligned original */
   lyric_override?: {

@@ -19,6 +19,8 @@ export function usePlayback(
 ) {
   const [rate, setRateState] = useState(1);
   const [loopSegment, setLoopSegment] = useState<Segment | null>(null);
+  /** AB loop: a dragged range on the progress bar, in seconds */
+  const [abLoop, setAbLoop] = useState<{ start: number; end: number } | null>(null);
   const [shadow, setShadow] = useState(false);
   const shadowTimer = useRef<number | null>(null);
 
@@ -56,8 +58,17 @@ export function usePlayback(
   // keeps working while the stage is paused and resumed.
   useEffect(() => {
     const a = audioRef.current;
-    if (!a || !loopSegment) return;
+    if (!a) return;
+    if (!loopSegment && !abLoop) return;
     const onTime = () => {
+      if (abLoop) {
+        if (a.currentTime > abLoop.end - 0.05 || a.currentTime < abLoop.start - 0.3) {
+          a.currentTime = abLoop.start;
+          void a.play();
+        }
+        return;
+      }
+      if (!loopSegment) return;
       if (a.currentTime > loopSegment.end - 0.05) {
         a.currentTime = Math.max(0, loopSegment.start);
         void a.play();
@@ -65,7 +76,7 @@ export function usePlayback(
     };
     a.addEventListener("timeupdate", onTime);
     return () => a.removeEventListener("timeupdate", onTime);
-  }, [audioRef, loopSegment]);
+  }, [audioRef, loopSegment, abLoop]);
 
   /**
    * 跟读: pause at the end of each line for a beat, then wait for the user.
@@ -105,6 +116,17 @@ export function usePlayback(
     stepRate,
     loopSegment,
     toggleLoop,
+    abLoop,
+    /** set/clear the dragged range; a range shorter than 1 s is ignored */
+    setAbLoop: (range: { start: number; end: number } | null) => {
+      if (!range) {
+        setAbLoop(null);
+        return;
+      }
+      const start = Math.max(0, Math.min(range.start, range.end));
+      const end = Math.max(range.start, range.end);
+      setAbLoop(end - start >= 1 ? { start, end } : null);
+    },
     shadow,
     toggleShadow: () => setShadow((v) => !v),
   };

@@ -22,7 +22,7 @@ const SOURCE_NOTE: Record<string, string> = {
   lrclib: "逐行",
 };
 
-type LyricMode = "search" | "custom";
+type LyricMode = "search" | "custom" | "file";
 
 function fmtDur(s: number) {
   if (!s) return "--:--";
@@ -73,6 +73,21 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
   const [audioSec, setAudioSec] = useState("");
   /* custom-lyrics: ask for the offline zh translation during the build job */
   const [wantTranslate, setWantTranslate] = useState(false);
+
+  /* ---- step 2b: local lyric file (5.3.2) ---- */
+  type LocalLyrics = {
+    filename: string;
+    kind: "char" | "line";
+    lines: number;
+    units: number;
+    translation: number;
+    preview: { start: number; end: number; text: string }[];
+    token: string;
+  };
+  const [localLyrics, setLocalLyrics] = useState<LocalLyrics | null>(null);
+  const [localErr, setLocalErr] = useState<string | null>(null);
+  const [localBusy, setLocalBusy] = useState(false);
+  const lyricsFileRef = useRef<HTMLInputElement>(null);
 
   /* ---- step 3: build ---- */
   const [job, setJob] = useState<Job | null>(null);
@@ -237,6 +252,32 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
     }
   };
 
+  /* ---- 5.3.2 本地歌词文件 ---- */
+  const pickLyricsFile = useCallback(async (file: File) => {
+    setLocalBusy(true);
+    setLocalErr(null);
+    setLocalLyrics(null);
+    try {
+      setLocalLyrics(await api.uploadLyrics(file));
+    } catch (e) {
+      setLocalErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLocalBusy(false);
+    }
+  }, []);
+
+  const buildFromLocal = () => {
+    if (!upload || !localLyrics) return;
+    void track(() =>
+      api.buildFromLocal({
+        lyrics_token: localLyrics.token,
+        upload_id: upload.id,
+        title: title || upload.filename,
+        artist,
+      }),
+    );
+  };
+
   const pct = job ? Math.round(job.progress * 100) : 0;
   const hasAudio = !!upload;
   const canSearch = hasAudio && !!picked && !busy;
@@ -379,6 +420,15 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
             >
               自定义歌词
               <em>粘贴文本，用音频对齐</em>
+            </button>
+            <button
+              role="tab"
+              aria-selected={mode === "file"}
+              className={mode === "file" ? "on" : ""}
+              onClick={() => setMode("file")}
+            >
+              导入歌词文件
+              <em>.qrc / .krc / .lrc</em>
             </button>
           </div>
 
@@ -545,7 +595,7 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                 </div>
               )}
             </>
-          ) : (
+          ) : mode === "custom" ? (
             <>
               {/* the speech model is a separate download, not part of lite —
                   surface its state right where it is needed so a missing pack
@@ -636,7 +686,78 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                 </button>
               </div>
             </>
-          )}
+          ) : mode === "file" ? (
+            <>
+              <div className="file-drop" onClick={() => lyricsFileRef.current?.click()}>
+                <span className="file-drop-main">
+                  {localLyrics
+                    ? `${localLyrics.filename} · ${localLyrics.lines} 行`
+                    : localBusy
+                      ? "读取中…"
+                      : "选择一个歌词文件"}
+                </span>
+                <span className="file-drop-sub">
+                  支持 .qrc / .krc(逐字)、增强 LRC(逐字)、普通 LRC(逐行);
+                  纯文本请用「自定义歌词」
+                </span>
+              </div>
+              <input
+                ref={lyricsFileRef}
+                type="file"
+                accept=".qrc,.krc,.lrc,.txt"
+                className="bgfile"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void pickLyricsFile(f);
+                  e.target.value = "";
+                }}
+              />
+
+              {localErr && <p className="hint-warn">{localErr}</p>}
+
+              {localLyrics && (
+                <>
+                  <div className="local-summary">
+                    <span className={`kind${localLyrics.kind === "char" ? " char" : ""}`}>
+                      {localLyrics.kind === "char" ? "逐字时间轴" : "逐行时间轴"}
+                    </span>
+                    <span>共 {localLyrics.lines} 行 / {localLyrics.units} 个单元</span>
+                    {localLyrics.translation > 0 && (
+                      <span>· 含 {localLyrics.translation} 行翻译</span>
+                    )}
+                  </div>
+                  <div className="local-preview">
+                    {localLyrics.preview.map((p, k) => (
+                      <div className="local-line" key={k}>
+                        <span className="local-time">{fmtDur(p.start)}</span>
+                        <span className="local-text">{p.text}</span>
+                      </div>
+                    ))}
+                    {localLyrics.lines > localLyrics.preview.length && (
+                      <span className="local-more">
+                        …还有 {localLyrics.lines - localLyrics.preview.length} 行
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div className="panel-foot">
+                <span className="picked-note">
+                  {localLyrics
+                    ? "歌词文件已就绪,可以直接生成"
+                    : "在线源失效时,这是最稳的一条路"}
+                </span>
+                <button
+                  className="btn primary"
+                  onClick={buildFromLocal}
+                  disabled={!hasAudio || !localLyrics || busy}
+                >
+                  生成
+                </button>
+              </div>
+            </>
+          ) : null}
 
           {(busy || job) && (
             <div className="job">

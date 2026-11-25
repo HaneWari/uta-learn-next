@@ -8,6 +8,7 @@ import { popUndo } from "../lib/saveQueue";
 import { ShortcutHelp } from "./ShortcutHelp";
 import { WordPopover } from "./WordPopover";
 import type { WordHit } from "./WordPopover";
+import { LyricsRail } from "./LyricsRail";
 import { Player } from "./Player";
 import { LyricsDisplay } from "./LyricsDisplay";
 import { VocabCards } from "./VocabCards";
@@ -41,9 +42,15 @@ interface Props {
   onPatchView?: (view: Record<string, boolean>) => void;
   /** called after Ctrl+Z restores something, so the shell can toast it */
   onUndo?: (label: string) => void;
+  /** 5.3.3 逐行微调: move the current line ±0.1 s */
+  onNudgeLine?: (segmentId: number, delta: number) => void;
+  /** 5.3.3 单行重新对齐 */
+  onRealignLine?: (segmentId: number) => void;
+  /** whether the whisper pack is installed (greys the realign button) */
+  canRealign?: boolean;
 }
 
-export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment, onPatchTrans, onPatchView, onUndo }: Props) {
+export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment, onPatchTrans, onPatchView, onUndo, onNudgeLine, onRealignLine, canRealign }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
   /* Song-wide view state. It lives in `meta.view` on the server rather than in
      localStorage: a second browser, the pywebview window, or a copied dataset
@@ -109,6 +116,8 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
   const playback = usePlayback(audioRef, visibleSegments);
   const [helpOpen, setHelpOpen] = useState(false);
   const [wordHit, setWordHit] = useState<WordHit | null>(null);
+  /* the whole-song rail is off by default: the stage stays clean unless asked */
+  const [railOpen, setRailOpen] = useState(false);
 
   // A plain function, refreshed every render through a ref: the keyboard
   // listener then reads the *current* closure without being rebuilt, and the
@@ -229,6 +238,8 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
         shadow={playback.shadow}
         onToggleLoop={() => playback.toggleLoop(visibleSegments[syncState.displayIndex] ?? null)}
         onToggleShadow={playback.toggleShadow}
+        abLoop={playback.abLoop}
+        onAbLoop={playback.setAbLoop}
       />
 
       <main className="main">
@@ -247,6 +258,19 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
             showRomaji: !layerHidden("romaji", "hideromaji"),
             showNext: !layerHidden("next_line", "hidenext"),
           }}
+          onNudgeLine={render ? undefined : onNudgeLine}
+          onRealign={render ? undefined : onRealignLine}
+          canRealign={canRealign ?? false}
+          onSeekLine={
+            render
+              ? undefined
+              : (seg) => {
+                  const a = audioRef.current;
+                  if (!a) return;
+                  a.currentTime = Math.max(0, seg.start - 0.05);
+                  void a.play();
+                }
+          }
         />
         {/* the export recorder must never carry the collapsed bar, so the
             whole row is unmounted in render mode when cards are hidden */}
@@ -284,6 +308,22 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
           />
         )}
       </main>
+
+      {!render && (
+        <LyricsRail
+          segments={visibleSegments}
+          activeId={visibleSegments[syncState.displayIndex]?.id ?? null}
+          open={railOpen}
+          onToggle={() => setRailOpen((v) => !v)}
+          onSeek={(seg) => {
+            const a = audioRef.current;
+            if (a) {
+              a.currentTime = Math.max(0, seg.start - 0.05);
+              void a.play();
+            }
+          }}
+        />
+      )}
 
       <div className="curtain" aria-hidden={!syncState.outro}>
         <span className="curtain-mark">唄</span>

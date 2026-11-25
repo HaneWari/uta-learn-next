@@ -15,6 +15,9 @@ interface PlayerProps {
   /** 跟读 mode is on */
   shadow?: boolean;
   onToggleShadow?: () => void;
+  /** dragged AB loop range, if any */
+  abLoop?: { start: number; end: number } | null;
+  onAbLoop?: (range: { start: number; end: number } | null) => void;
 }
 
 function fmt(t: number) {
@@ -34,6 +37,8 @@ export function Player({
   onToggleLoop,
   shadow = false,
   onToggleShadow,
+  abLoop = null,
+  onAbLoop,
 }: PlayerProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const knobRef = useRef<HTMLDivElement>(null);
@@ -42,6 +47,58 @@ export function Player({
   const [localRate, setLocalRate] = useState(1);
   const rate = controlledRate ?? localRate;
   const [speedOpen, setSpeedOpen] = useState(false);
+
+  /* AB drag: a range, not a click. `dragging` also suppresses the seek that
+     the click would otherwise fire when the mouse comes back up. */
+  const dragStart = useRef<number | null>(null);
+  const abDragging = useRef(false);
+  const [preview, setPreview] = useState<{ start: number; end: number } | null>(null);
+  const abRange = abLoop ?? preview;
+
+  // the duration lives in state as well as the element: reading it during
+  // render would touch a ref, which the hooks lint rejects (and React may
+  // render before the media element has metadata anyway)
+  const [duration, setDuration] = useState(0);
+  const ratio = (t: number) =>
+    duration ? Math.min(100, Math.max(0, (t / duration) * 100)) : 0;
+
+  const timeAt = (clientX: number, el: HTMLElement) => {
+    const d = duration;
+    const r = el.getBoundingClientRect();
+    const pct = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+    return pct * d;
+  };
+
+  const beginAb = (e: React.MouseEvent<HTMLDivElement>) => {
+    const a = audioRef.current;
+    if (!a || !duration) return;
+    dragStart.current = timeAt(e.clientX, e.currentTarget);
+    abDragging.current = false;
+  };
+
+  const moveAb = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (dragStart.current === null) return;
+    const now = timeAt(e.clientX, e.currentTarget);
+    if (Math.abs(now - dragStart.current) < 0.4) return;
+    abDragging.current = true;
+    setPreview({
+      start: Math.min(dragStart.current, now),
+      end: Math.max(dragStart.current, now),
+    });
+  };
+
+  const endAb = () => {
+    if (dragStart.current === null) return;
+    const moved = abDragging.current;
+    dragStart.current = null;
+    abDragging.current = false;
+    if (!moved) {
+      setPreview(null);
+      return;
+    }
+    onAbLoop?.(preview);
+    setPreview(null);
+  };
 
   // the controlled value can change from a shortcut, so mirror it onto the
   // element rather than relying on the click handler alone
@@ -83,7 +140,7 @@ export function Player({
 
   const seek = (e: MouseEvent<HTMLDivElement>) => {
     const a = audioRef.current;
-    if (!a || !a.duration) return;
+    if (!a || !duration) return;
     const r = e.currentTarget.getBoundingClientRect();
     a.currentTime = ((e.clientX - r.left) / r.width) * a.duration;
   };
@@ -95,6 +152,7 @@ export function Player({
           ref={audioRef}
           src={audioSrc}
           preload="auto"
+          onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
           onPlay={() => setPaused(false)}
           onPause={() => setPaused(true)}
         />
@@ -154,11 +212,41 @@ export function Player({
                 0:00 / 0:00
               </span>
             </div>
-            <div className="progress" onClick={seek}>
+            {/* drag across the bar to loop that range (AB 循环). A plain click
+                still seeks, so the two gestures do not fight. */}
+            <div
+              className="progress"
+              onClick={seek}
+              onMouseDown={beginAb}
+              onMouseMove={moveAb}
+              onMouseUp={endAb}
+              onMouseLeave={() => {
+                if (abDragging.current) endAb();
+              }}
+            >
               <div className="track" />
+              {abRange && (
+                <div
+                  className="ab-band"
+                  style={{
+                    left: `${ratio(abRange.start)}%`,
+                    width: `${Math.max(0.4, ratio(abRange.end) - ratio(abRange.start))}%`,
+                  }}
+                />
+              )}
               <div className="fill" ref={barRef} />
               <div className="knob" ref={knobRef} />
             </div>
+            {abRange && (
+              <button
+                className="ab-clear"
+                type="button"
+                onClick={() => onAbLoop?.(null)}
+                title="取消 AB 循环"
+              >
+                AB {fmt(abRange.start)}–{fmt(abRange.end)} · 清除
+              </button>
+            )}
           </>
         ) : (
           <div className="dock-row">

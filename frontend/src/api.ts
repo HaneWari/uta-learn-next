@@ -142,6 +142,70 @@ export const api = {
     translate?: boolean;
   }) => post<{ job_id: string; name: string }>("/api/build-text", payload),
 
+  /* local lyric file: preview first, then build (5.3.2) */
+  uploadLyrics: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return fetch(`${BASE}/api/uploads/lyrics`, {
+      method: "POST",
+      headers: writeHeaders(),
+      body: form,
+    }).then((r) =>
+      json<{
+        filename: string;
+        kind: "char" | "line";
+        lines: number;
+        units: number;
+        translation: number;
+        preview: { start: number; end: number; text: string }[];
+        token: string;
+      }>(r),
+    );
+  },
+
+  buildFromLocal: (payload: {
+    lyrics_token: string;
+    upload_id: string;
+    title?: string;
+    artist?: string;
+  }) => post<{ job_id: string; name: string }>("/api/build-local", payload),
+
+  /* one line re-aligned against ±5 s of its own audio (5.3.3) */
+  realignLine: (song: string, segmentId: number) =>
+    post<{ job_id: string }>(`/api/songs/${encodeURIComponent(song)}/realign/${segmentId}`, {}),
+
+  /* per-song display layers, same meta channel as the translation flag */
+  setView: (name: string, view: Record<string, boolean>) =>
+    fetch(`${BASE}/api/songs/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      headers: writeHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ view }),
+    }).then((r) => json<{ view: Record<string, boolean> }>(r)),
+
+  /* update check + patch apply (5.5.3) */
+  updateCheck: (force = false) =>
+    fetch(`${BASE}/api/update/check?force=${force ? "true" : "false"}`).then((r) =>
+      json<{
+        enabled: boolean;
+        available: boolean;
+        current: string;
+        latest?: string;
+        kind?: "patch" | "full";
+        runtime_changed?: boolean;
+        notes?: string;
+        error?: string;
+      }>(r),
+    ),
+
+  updateApply: () =>
+    post<{ job_id: string; kind: string }>("/api/update/apply", {}),
+
+  updateRollback: () =>
+    post<{ rolled_back: boolean; needs_restart: boolean }>(
+      "/api/update/rollback",
+      {},
+    ),
+
   job: (id: string) => fetch(`${BASE}/api/jobs/${id}`).then((r) => json<Job>(r)),
 
   /* whisper model extension pack for the custom-lyrics mode */

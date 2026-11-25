@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { api, waitForJob } from "../api";
 import { useSettings } from "../lib/settings";
 import type { AboutInfo, AppSettings } from "../types";
 
@@ -90,6 +90,19 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [about, setAbout] = useState<AboutInfo | null>(null);
   const [proxyNote, setProxyNote] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  /* update state: check · download · restart */
+  const [update, setUpdate] = useState<{
+    checking: boolean;
+    available: boolean;
+    latest?: string;
+    kind?: "patch" | "full";
+    runtimeChanged?: boolean;
+    notes?: string;
+    error?: string;
+    applying: boolean;
+    pct: number;
+    ready?: string;
+  }>({ checking: false, available: false, applying: false, pct: 0 });
 
   useEffect(() => {
     if (group !== "about" && group !== "packs") return;
@@ -120,6 +133,60 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       setProxyNote(e instanceof Error ? e.message : String(e));
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function checkUpdate(force = true) {
+    setUpdate((u) => ({ ...u, checking: true, error: undefined }));
+    try {
+      const r = await api.updateCheck(force);
+      setUpdate({
+        checking: false,
+        available: !!r.available,
+        latest: r.latest,
+        kind: r.kind,
+        runtimeChanged: r.runtime_changed,
+        notes: r.notes,
+        error: r.error,
+        applying: false,
+        pct: 0,
+      });
+    } catch (e) {
+      setUpdate((u) => ({
+        ...u,
+        checking: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
+    }
+  }
+
+  async function applyUpdate() {
+    setUpdate((u) => ({ ...u, applying: true, pct: 0 }));
+    try {
+      const { job_id } = await api.updateApply();
+      const done = await waitForJob(job_id, (j) =>
+        setUpdate((u) => ({ ...u, pct: Math.round(j.progress * 100) })),
+      );
+      if (done.status === "error") {
+        setUpdate((u) => ({
+          ...u,
+          applying: false,
+          error: done.error ?? "更新失败",
+        }));
+        return;
+      }
+      setUpdate((u) => ({
+        ...u,
+        applying: false,
+        available: false,
+        ready: "更新已准备好，重启后生效",
+      }));
+    } catch (e) {
+      setUpdate((u) => ({
+        ...u,
+        applying: false,
+        error: e instanceof Error ? e.message : String(e),
+      }));
     }
   }
 
@@ -398,6 +465,54 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
                   </>
                 )}
+                <div className="setrow">
+                  <span className="setlabel">
+                    版本更新
+                    <span className="sethint">
+                      {update.ready
+                        ? update.ready
+                        : update.checking
+                          ? "检查中..."
+                          : update.available
+                            ? update.kind === "patch"
+                              ? `新版本 ${update.latest}（补丁，约 1MB）`
+                              : `新版本 ${update.latest}（运行时变化，需完整包）`
+                            : update.error
+                              ? `检查失败：${update.error}`
+                              : update.latest
+                                ? "已是最新版本"
+                                : "启动时会静默检查一次"}
+                    </span>
+                  </span>
+                  <div className="update-actions">
+                    {update.available && update.kind === "patch" && (
+                      <button
+                        className="btn primary"
+                        onClick={() => void applyUpdate()}
+                        disabled={update.applying}
+                      >
+                        {update.applying ? `下载中 ${update.pct}%` : "下载并更新"}
+                      </button>
+                    )}
+                    {update.available && update.kind === "full" && (
+                      <a
+                        className="btn primary"
+                        href="https://github.com/HaneWari/uta-learn-next/releases/latest"
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        下载完整包
+                      </a>
+                    )}
+                    <button
+                      className="btn"
+                      onClick={() => void checkUpdate(true)}
+                      disabled={update.checking}
+                    >
+                      检查更新
+                    </button>
+                  </div>
+                </div>
                 <p className="sethint">
                   第三方组件：ffmpeg（GPL）、faster-whisper（MIT）、
                   opus-mt-ja-zh（CC-BY-4.0）。完整许可见发行版内 LICENSES/。

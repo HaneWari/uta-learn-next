@@ -45,6 +45,8 @@ export default function App() {
   const [bookOpen, setBookOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportListOpen, setExportListOpen] = useState(false);
+  /* 单行重新对齐 needs the whisper pack; the button says so when it is absent */
+  const [whisperReady, setWhisperReady] = useState(false);
   const {
     songData,
     error,
@@ -72,6 +74,13 @@ export default function App() {
   // the background lives server-side so the export sees the same one
   useEffect(() => {
     api.background().then(setBackground).catch(() => setBackground(DEFAULT_BG));
+  }, []);
+
+  useEffect(() => {
+    api
+      .modelStatus()
+      .then((s) => setWhisperReady(!!s.installed))
+      .catch(() => setWhisperReady(false));
   }, []);
 
   // first visit: open the reference song, or whatever is available
@@ -442,6 +451,25 @@ export default function App() {
             onPatchTrans={(hidden) => void setTransHidden(hidden, true)}
             onPatchView={(view) => void patchView(view)}
             onUndo={(label) => setExportNote(`已撤销:${label}`)}
+            onNudgeLine={(segmentId, delta) => {
+              const seg = songData?.segments.find((s) => s.id === segmentId);
+              if (!seg) return;
+              const next = Math.max(
+                -2,
+                Math.min(2, Math.round(((seg.line_offset ?? 0) + delta) * 10) / 10),
+              );
+              void patchSegment(segmentId, { line_offset: next });
+            }}
+            onRealignLine={(segmentId) => {
+              if (!song) return;
+              void api
+                .realignLine(song, segmentId)
+                .then(() => setExportNote("正在重新对齐这一行…"))
+                .catch((e: unknown) =>
+                  setExportNote(e instanceof Error ? e.message : String(e)),
+                );
+            }}
+            canRealign={whisperReady}
           />
         )}
       </div>

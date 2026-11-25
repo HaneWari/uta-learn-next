@@ -75,6 +75,10 @@ export function useSyncEngine(
       // the same list the display renders, so an edited line's rebuilt words
       // are what gets highlighted
       const words = effectiveWords(seg);
+      // 逐行微调 layers a per-line offset on top of the song-wide one; shifting
+      // the kana here means the wipe, the card row and the "next" preview all
+      // move together
+      const shift = seg.line_offset ?? 0;
       for (let wi = 0; wi < words.length; wi++) {
         const w = words[wi];
         if (w.chars && w.chars.length) {
@@ -84,8 +88,8 @@ export function useSyncEngine(
               segmentId: seg.id,
               wordIndex: wi,
               charIndex: ci,
-              start: c.start,
-              end: c.end,
+              start: c.start + shift,
+              end: c.end + shift,
             });
           }
         } else {
@@ -93,8 +97,8 @@ export function useSyncEngine(
             segmentId: seg.id,
             wordIndex: wi,
             charIndex: 0,
-            start: w.start,
-            end: w.end,
+            start: w.start + shift,
+            end: w.end + shift,
           });
         }
       }

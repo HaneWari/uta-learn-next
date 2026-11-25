@@ -60,7 +60,11 @@ _WRITABLE_KEYS = {
     # `hidden` skips a line entirely
     "lyric_override",
     "hidden",
+    # 5.3.3 逐行微调: this line's own offset against the audio, on top of the
+    # song-wide `meta.time_offset`
+    "line_offset",
 }
+LINE_OFFSET_MAX = 2.0
 
 # Song-wide settings that sit in `meta` rather than on a segment. The offset
 # shifts the whole lyric timeline against the audio (positive = lyrics later);
@@ -135,6 +139,23 @@ def api_patch_song(name: str, patch: dict, request: Request):
                 continue
             for key in _WRITABLE_KEYS - {"id"}:
                 if key in patch:
+                    if key == "line_offset" and patch[key] is not None:
+                        try:
+                            value = round(float(patch[key]), 1)
+                        except (TypeError, ValueError):
+                            raise HTTPException(
+                                status_code=400,
+                                detail="本行偏移必须是数字") from None
+                        if not -LINE_OFFSET_MAX <= value <= LINE_OFFSET_MAX:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"本行偏移须在 -{LINE_OFFSET_MAX:g} 到 "
+                                       f"{LINE_OFFSET_MAX:g} 秒之间")
+                        if value == 0:
+                            seg.pop("line_offset", None)
+                        else:
+                            seg["line_offset"] = value
+                        continue
                     if patch[key] is None:
                         seg.pop(key, None)
                     else:
