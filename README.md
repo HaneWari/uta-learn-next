@@ -5,9 +5,8 @@
 [![Stars](https://img.shields.io/github/stars/HaneWari/uta-learn-next)](https://github.com/HaneWari/uta-learn-next/stargazers)
 [![License](https://img.shields.io/github/license/HaneWari/uta-learn-next)](./LICENSE)
 
-跟着日语歌学日语:**逐字**卡啦 OK 高亮、标注汉字的假名注音、罗马音、中文翻译,以及按真实词元
-(辞书形 + 词性 + JLPT + 中文释义)和句型整理的词汇卡。可以把自己下载的音频配任意歌词源,
-也能一键导出横屏 / 竖屏 / 4K 的 60fps 成片。
+跟着日语歌学日语：**逐字**卡啦 OK 高亮、标注汉字的假名注音、罗马音、中文翻译，以及按真实词元
+（辞书形 + 词性 + JLPT + 中文释义）和句型整理的词汇卡。可以把自己下载的音频配任意歌词源，
 也能一键导出 1920×1080 / 60fps 的成片。
 
 **本项目不提供相关音频资源，请自行获取**
@@ -61,18 +60,10 @@
 | `UtaLearnNext-chromium.zip` | ~316 MB | 可选扩展包（**版本无关**）：内置 Chromium。本机没有 Chromium 内核浏览器又想导出视频时才需要——「导出视频」会先检测环境，缺了可点「安装 Chromium 扩展包」自动装好；手动解压到应用目录得到 `browsers/` 也行。 |
 | `UtaLearnNext-custom-lyrics.zip` | ~490 MB | 可选扩展包（**版本无关**）：自定义歌词用的 whisper 识别 + 日→中翻译模型。在「自定义歌词」面板点「下载并安装扩展」自动装到 `models/`；手动解压到应用目录得到 `models/`（内含 `whisper-small/` 与 `translate-ja-zh/`）也行。不用自定义歌词就不用下。 |
 
-核心包解压后双击 **`启动 Uta Learn Next.vbs`**（或 `启动 Uta Learn Next.cmd`）即可。
-自带 Python 运行时、ffmpeg/ffprobe、pywebview 与已构建好的前端；不写注册表、不改 PATH、
-不需要管理员权限。
-
-- 默认启动一个**桌面窗口**（Edge WebView2 内核），不会再出现黑窗口
-- 机器上没有 WebView2（例如部分 Win10 LTSC）时，自动改用系统浏览器打开
-- 需要看后端日志时，用 `启动 Uta Learn Next (控制台).cmd`
-- 窗口大小与位置会被记住，下次打开还在原处
-- 设置里的「在浏览器中打开」可以两边同时用
-
-需要导出但本机没有 Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium
-扩展包解压进来就行——程序下次启动会自动识别 `browsers/`，不用装、不用改配置。
+核心包解压后双击 **`启动 Uta Learn Next.cmd`** 即可。自带 Python 运行时、ffmpeg/ffprobe
+与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。需要导出但本机没有
+Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium 扩展包解压进来就行——
+程序下次启动会自动识别 `browsers/`，不用装、不用改配置。
 
 两个扩展包都**与版本无关**：浏览器二进制和冻结的语音模型远比应用更新慢，
 下载一次即可在任意版本上复用，升级应用不必重下。
@@ -101,6 +92,10 @@ cd backend && python -m uvicorn main:app --reload --port 8000   # 后端热重�
 cd frontend && npm run dev                                       # 前端 vite 开发服
 ```
 
+```bash
+docker compose up --build                                        # 或者直接用 Docker
+```
+
 </details>
 
 <details>
@@ -127,46 +122,40 @@ ffmpeg 用的是 **essentials（精简）构建**：静态链接、单个约 104
 
 界面分「配置」和「播放」两个标签页。
 
-### 播放:跟唱与学习
+### 配置：把一首歌变成可跟唱的数据集
 
-把一根手指放在空格上就能用:
+流程是三步：**先放音频 → 再决定歌词从哪来 → 生成**。
 
-| 按键 | 功能 | 按键 | 功能 |
-| --- | --- | --- | --- |
-| `Space` | 播放 / 暂停 | `R` | 单句循环 |
-| `←` / `→` | 上一句 / 下一句 | `F` | 跟读模式 |
-| `Shift` + `←` / `→` | 后退 / 前进 5 秒 | `T` / `K` | 翻译 / 卡片 显示开关 |
-| `[` / `]` | 降 / 升一档速度 | `?` | 快捷键一览 |
-| `Esc` | 关闭弹窗、退出编辑 | `Ctrl+Z` | 撤销上一次卡片编辑 |
+**第 1 步 · 上传音频**（mp3 / wav / m4a / flac，最大 200MB）。跟唱必须有音频。
 
-编辑输入框时不响应单键快捷键,避免和打字冲突。
+**第 2 步 · 选择歌词来源**，两种方式：
 
-- **单句循环**:按 `R`,当前这句唱完自动跳回它的开头,反复练一句。
-- **跟读**:按 `F`,每句唱完自动暂停一会儿再继续,停顿时长按句子长度自动放大。
-- **点词查词**:单击歌词里任意一个词,弹出读音、辞书形、词性、JLPT 与中文释义,
-  可以「加入生词本」,也可以「从这句播放」。
-- **生词本**:导航栏「生词本」,跨歌汇总、可搜索、可按歌筛选、可删;「回到这一句」跳回原曲那一行。
-- **倍速** 0.25×–2×,点当前倍速展开选择。
-- **时间偏移**:高亮总比歌声早或晚一点时,导航栏「时间偏移」给这首歌设 −2~+2 秒(0.1 秒精度)。
-  正数让高亮与切句延后,负数提前;只影响这一首,导出同样生效。
-- **设置背景**:导航栏「设置背景」可换纸感背景或自己的图片。
-- **右键菜单**:右键舞台任意空白处 → 新建词条卡片 / 隐藏或显示词条卡片 / 隐藏或显示中文翻译。
+- **搜索歌词**：同时查 QQ 音乐、酷狗、Lrclib。QQ 音乐和酷狗给的是**逐字时间戳**
+  （每个字都有起止时间，高亮最准），Lrclib 只有行级时间。
+- **自定义歌词**：直接粘贴文本，每行一句，不需要时间轴，用 whisper 在你上传的音频上自动对齐。
+  对齐用的是「切片转写 + 全曲假名全局对齐 + 逐字锚定」：whisper 分短窗识别出词，
+  再把所有歌词假名与所有识别假名做一次全局动态规划，逐个音取回它在转写里的时间；
+  识别缺失的音按相邻音插值、整行都没识别的按歌速平摊到空白里，音频只覆盖片段时
+  自动裁掉没唱到的头尾。在 3 首有逐字真值的歌上逐字平均误差约 **0.3 秒**。
+  - **自定义读音**：某个汉字/词组要读成别的音时，写成 `[汉字](读音)`，
+    例如 `[明日](あす)`、`[運命](さだめ)`；假名、片假名、罗马音（`[明日](asu)`）都行，
+    方括号与圆括号用中文全角（`【】（）`）也认。
+  - 该功能需要模型扩展包：在自定义歌词面板点「**下载并安装扩展**」一键装好
+  （从本仓库最新发行版拉取 `UtaLearnNext-custom-lyrics.zip`，含 whisper 识别 +
+  日→中翻译两个模型），或手动下载该 zip 解压到应用目录得到 `models/`。
+  装好扩展后，自定义歌词页的「开启中文翻译」开关会在生成时为每句顺带产出
+  中文翻译（int8 模型约 80MB）；不装扩展或不开开关就只对齐不翻译。
 
-### 设置
+**第 3 步 · 生成**，完成后自动跳到播放页。
 
-导航栏齿轮打开设置,分七组:常规、显示、歌词、网络、导出、扩展包、关于。常用的几项:
+### 播放：跟唱
 
-- **显示 → 助词读法**:「東京へ行こう」读 `toukyou e ikou`(按发音,默认)或 `toukyou he ikou`(按字面)。
-  切换后所有已生成的歌立即按新读法显示,不用重新生成。
-- **显示 → 长音写法**:`toukyou` / `tōkyō` / `tookyoo` 三选一,同样即时生效。
-- **显示 → 主题 / 减少动效**:跟随系统、浅色、深色;对动效敏感可关掉入场动画。
-- **歌词 → 默认搜索排序**:时长匹配、逐字优先、按来源。
-- **网络 → 代理**:自动 / 系统 / 手动 / 关闭,带「测试」按钮;改完立即生效,不用重启。
-- **导出**:默认预设与并行页数。
-- **扩展包**:两个扩展包的安装状态。
-- **关于**:版本号、应用目录、数据目录、导出诊断包、第三方许可。
-
-设置存在 `localdata/settings.json`。
+- 空格 播放 / 暂停，← → 前后 5 秒
+- 倍速 0.25×–2×，点当前倍速向左展开选择
+- 右下角进度条可点击跳转
+- 导航栏「时间偏移」：如果高亮总比歌声早或晚一点，可以给这首歌设一个 −2～+2 秒（精确到 0.1 秒）的偏移。正数让高亮和切句延后，负数让它们提前。调的时候边听边看，改动立即生效；只影响这一首，导出视频同样生效
+- 导航栏「设置背景」可换播放页背景（默认纸感 / 自定义图片），「导出视频」渲染成 MP4
+- 右键舞台任意空白处弹出菜单：新建词条卡片、隐藏/显示词条卡片、隐藏/显示中文翻译
 
 #### 歌词也可以改
 
@@ -194,40 +183,29 @@ ffmpeg 用的是 **essentials（精简）构建**：静态链接、单个约 104
 
 ## 导出视频
 
-导航栏「导出视频」把当前这首渲染成 MP4,音频直接混流,不重新编码音轨。先弹一个对话框:
+导航栏「导出视频」把当前这首渲染成 **1920×1080 / 60fps** 的 MP4，音频直接混流，不重新编码音轨。
 
-- **三档预设,统一 60fps**:横屏 1920×1080、竖屏 1080×1920(短视频)、4K 3840×2160。
-  4K 复用 1080p 的排版,只是渲染分辨率翻倍,版式不会变。
-- **只导出片段**:打开开关后填起止时间(`m:ss`),只渲染这一段;音频在同一时刻切开。
-- **预计耗时**:按预设、片段长度和并行页数估算,渲染中会显示进度百分比。
+- 成片时长 = **音频实际时长**（不是歌词时间轴长度——两者常常差几十秒）
+- 录制按播放进度结束，慢机器不会截掉尾巴
+- 视频轨若比音频短，会克隆末帧补齐，最后几秒不会没画面
+- **录制时间轴会重新对齐**：浏览器录出来的 WebM 并不保证覆盖真实经过的时间，
+  实测一首 221 秒的歌画面被拉长约 1.4%，表现为「开头正常、越到后面字幕越晚」。
+  现在用「播放开始→结束」的墙钟时长除以录制跨度得到缩放系数，`setpts` 校正后再转 60fps
+- 录完会读成片进度条像素反推音画偏差，必要时自动重混一次
 
-成片参数:
-
-- 成片时长 = **音频实际时长**(不是歌词时间轴长度——两者常常差几十秒)
-- 录制按播放进度结束,慢机器不会截掉尾巴
-- 视频轨若比音频短,会克隆末帧补齐,最后几秒不会没画面
-- **录制时间轴会重新对齐**:浏览器录出来的 WebM 并不保证覆盖真实经过的时间,
-  实测一首 221 秒的歌画面被拉长约 1.4%,表现为「开头正常、越到后面字幕越晚」。
-  现在用「播放开始→结束」的墙钟时长除以录制跨度得到缩放系数,`setpts` 校正后再转 60fps
-- 录完会读成片进度条像素反推音画偏差,必要时自动重混一次;若校准结果不可信会跳过微调,
-  并且一定会检查成片里真的有画面(不会出现只有声音的 MP4)
-
-导出在**后台任务**里跑:可以关掉对话框,完成后用 toast 告知;导航栏「导出记录」列出
-导出过的文件、大小与时间,可打开所在文件夹或删除。
-
-点「导出视频」会先**检查导出环境**:Playwright 运行库、能启动的 Chromium 内核
-浏览器、ffmpeg 三者缺一即弹出诊断,给出一键自动修复或安装内置 Chromium
+点「导出视频」会先**检查导出环境**：Playwright 运行库、能启动的 Chromium 内核
+浏览器、ffmpeg 三者缺一即弹出诊断，给出一键自动修复或安装内置 Chromium
 扩展包的入口——而不是只报一句「导出不可用」。
 
-需要 Playwright 驱动的 Chromium 内核浏览器与 ffmpeg——不一定是 Google Chrome,
-**任何 Chromium 内核浏览器都行**(Windows 自带的 Edge、Brave、Vivaldi、360、QQ 等)。
-浏览器路径可用 `UTALEARN_CHROME` 指定,否则按顺序探测:环境变量 → `browsers/` 扩展包 →
-Playwright 缓存 → 各常见安装路径(Edge/Brave/Vivaldi/国产浏览器都在探测列表里)→ PATH。
+需要 Playwright 驱动的 Chromium 内核浏览器与 ffmpeg——不一定是 Google Chrome，
+**任何 Chromium 内核浏览器都行**（Windows 自带的 Edge、Brave、Vivaldi、360、QQ 等）。
+浏览器路径可用 `UTALEARN_CHROME` 指定，否则按顺序探测：环境变量 → `browsers/` 扩展包 →
+Playwright 缓存 → 各常见安装路径（Edge/Brave/Vivaldi/国产浏览器都在探测列表里）→ PATH。
 
-导出实际用到**三个东西**,别和 `bin/` 里那个 ffmpeg 混淆:
+导出实际用到**三个东西**，别和 `bin/` 里那个 ffmpeg 混淆：
 playwright 包驱动浏览器、Chromium 渲染画面、playwright **自带的** ffmpeg 把帧
-录成 webm(`record_video` 用,与 `bin/` 的 mux ffmpeg 是两份独立二进制)。
-缺浏览器 → 自动修复或装 `UtaLearnNext-chromium.zip`;缺录制组件 → 自动修复会
+录成 webm（`record_video` 用，与 `bin/` 的 mux ffmpeg 是两份独立二进制）。
+缺浏览器 → 自动修复或装 `UtaLearnNext-chromium.zip`；缺录制组件 → 自动修复会
 补 `playwright install chromium ffmpeg`。
 
 ### 校验成片音画同步
@@ -279,57 +257,40 @@ python tools/check_export_sync.py exports/xxx.mp4 --audio localdata/<歌名>/aud
 ## 目录结构
 
 ```
-desktop.py               桌面外壳:选端口、等后端、开窗口,失败退回浏览器
 backend/
-  main.py                只做装配:中间件 + 路由 + 静态 SPA
+  main.py                 FastAPI 路由：搜索 / 上传 / 构建 / 播放 / 导出 / 背景
   app/
-    api/                 路由按领域拆分(config / songs / export / packs / settings / update / stage)
-    paths.py             应用目录、数据目录、导出目录的解析
-    datasets.py          数据集命名、查找、音频格式与时长
-    repo.py              song_data.json 的锁、原子写、备份与 schema 迁移
-    guard.py             本地 API 防护(Host / Origin / 启动令牌)
-    packs.py             扩展包下载与解压(流式、SHA256、防穿越)
-    updater.py           更新检查、补丁暂存、应用与回退
-    jobs.py              后台任务:资源分类、取消、持久化、SSE
-    settings.py          settings.json 读写
-    logs.py / telemetry.py  滚动日志、诊断包、匿名心跳
-    vocab.py             生词本
-    sources.py           QQ 音乐、酷狗、Lrclib 歌词源(并行搜索)
-    builder.py           歌词 → 数据集(裁剪起点、时间重映射)
-    fallback.py          whisper 切片转写 + 假名全局对齐 + 逐字锚定
-    translate.py         离线日→中翻译(opus-mt int8 CT2 + sentencepiece)
-    dicts.py             分词、词典/句型查询、罗马音(双读法)
-    export.py            Playwright 录制 + ffmpeg 混流 + 自校准 + 三档预设
-    data/                jadict.json(词典)、grammar.json(句型)
+    sources.py            QQ 音乐、酷狗、Lrclib 歌词源
+    builder.py            歌词 → 数据集（裁剪起点、时间重映射）
+    fallback.py           whisper 切片转写 + 假名全局对齐 + 逐字锚定
+    translate.py          离线日→中翻译（opus-mt int8 CT2 + sentencepiece）
+    dicts.py              分词、词典/句型查询、罗马音
+    export.py             Playwright 录制 + ffmpeg 混流 + 自校准
+    data/                 jadict.json（词典）、grammar.json（句型）
 frontend/src/
-  App.tsx                 标签页、导航栏、弹窗编排
+  App.tsx                 标签页、导航栏、导出与背景入口
   components/             ConfigPage / Stage / Player / LyricsDisplay / VocabCards /
-                          SettingsModal / VocabBook / WordPopover / ExportDialog /
-                          ExportList / ShortcutHelp / BackgroundModal / OffsetModal
-  hooks/                  useSongData / useSyncEngine / usePlayback
-  lib/                    纯逻辑:cards / romaji / words / shortcuts / saveQueue / settings / theme
+                          BackgroundModal / OffsetModal / ExportEnvModal
+  hooks/                  useSongData / useSyncEngine
   furigana.ts             只标汉字的注音切分
-tools/                    数据构建、回归检查、便携包构建(见 tools/README.md)
-  telemetry-worker/       Cloudflare Worker + D1 心跳统计端
-localdata/                用户数据:数据集、设置、生词本(不提交)
-exports/                  导出的成片(不提交)
+tools/                    数据构建与回归检查（见 tools/README.md）
+localdata/                用户数据：数据集与上传（不提交）
+exports/                  导出的成片（不提交）
 ```
 
 ## 运行数据在哪
 
-- `localdata/<歌名>/song_data.json` — 时间轴、词元、词汇卡数据(schema v2,带 revision)
-- `localdata/<歌名>/audio.<ext>` — 该数据集的音频,保留导入时的真实格式
-- `localdata/settings.json` — 设置、匿名安装 ID
-- `localdata/_vocab.json` — 生词本
-- `localdata/_uploads/` — 上传暂存(24 小时后自动清理)
-- `localdata/_ui/` — 播放页背景与窗口位置
-- `localdata/logs/` — 滚动日志(2 MB × 5)
-- `localdata/.jobs.json` — 任务记录(重启后未完成的标为「已中断」)
-- `models/` — 扩展包模型目录(`whisper-small/`、`translate-ja-zh/`)
-- `browsers/` — Chromium 扩展包
+- `localdata/<歌名>/song_data.json` — 时间轴、词元、词汇卡数据
+- `localdata/<歌名>/audio.mp3` — 该数据集的音频
+- `localdata/_uploads/` — 上传的原始音频（可清理）
+- `localdata/_ui/` — 播放页背景设置
+- `models/` — 扩展包模型目录（`whisper-small/` 语音识别、`translate-ja-zh/` 日→中翻译，
+  由自定义歌词扩展包解压得到，不随核心包分发）
 - `exports/` — 导出的 MP4
 
-`localdata/`、`models/`、`browsers/` 与 `exports/` 都在 `.gitignore` 里。
+`localdata/`、`models/` 与 `exports/` 都在 `.gitignore` 里。
+
+---
 
 ## 环境变量
 
@@ -338,83 +299,39 @@ exports/                  导出的成片(不提交)
 | `DATA_DIR`            | `../localdata`          | 数据集目录                                |
 | `EXPORT_DIR`          | `../exports`            | 成片输出目录                              |
 | `DEFAULT_SONG`        | `braveheart`            | 首次打开时的默认曲目                      |
-| `UTALEARN_BASE_URL`   | 由请求推导              | 导出时无头浏览器访问本服务的地址          |
+| `UTALEARN_BASE_URL`   | `http://127.0.0.1:8000` | 导出时无头浏览器访问本服务的地址          |
 | `UTALEARN_CHROME`     | 自动探测                | 导出用的 Chromium 路径                    |
-| `UTALEARN_DEV`        | 未设置                  | `1` = 跳过本地令牌校验(开发用)            |
-| `UTALEARN_TELEMETRY`  | 未设置                  | `0` = 关闭匿名统计                        |
-| `UTALEARN_NO_WINDOW`  | 未设置                  | `1` = 不开桌面窗口,改用系统浏览器         |
 | `UTALEARN_DATA_DIR`   | `localdata`             | `tools/backfill_glosses.py` 的目标目录    |
 | `UTALEARN_TOMOSHI_DB` | `tools/_source/…`       | 重建词典时的源数据库                      |
 
 ---
 
----
-
-## 更新
-
-启动约 10 秒后静默检查一次新版本(设置里可关)。发现更新时,设置按钮出现小圆点:
-
-- **运行时没变 → 补丁更新**:约 1–5 MB,只替换 `backend/` 与 `frontend/dist/`;
-  下载后提示重启,重启时换入新版本,旧版留在 `app.prev/` 方便回退。
-- **运行时变了**(Python 版本、依赖或 ffmpeg 变化)→ 自动转为**完整包**,下载量更大。
-- 补丁包是应用层的**全量包**,不依赖中间装过哪个版本,所以 v2.x 可以直接跳到最新的 v2.y。
-- 每次都校验 SHA256;只从本仓库的 GitHub Release 下载,并遵循设置里的代理。
-- 设置 → 关于里可以「回退到上一版本」。
-
-v1.x(含 v1.3.0)没有更新器,需要下载一次 v2.0.0 完整包;歌曲数据、扩展包都能直接沿用。
-
-## 隐私
-
-默认开启**匿名使用统计**,只为知道大致有多少人在用、用的是哪个版本:
-
-- 每台机器每天最多一次,内容只有随机安装 ID(UUIDv4)、版本号、系统大版本;
-- 不含歌名、歌词、音频、文件路径、用户名、搜索词或任何功能使用记录;
-- 由后端 Python 发送,没有 cookie,也没有浏览器指纹;
-- 设置里可以随时关掉,关掉会删除本地安装 ID。
-
-详见 [`PRIVACY.md`](PRIVACY.md)。
-
 ## 开发
 
 ```bash
-# 后端(带热重载),需要 PATH 里有 ffmpeg
+# 后端（带热重载）
 cd backend && python -m uvicorn main:app --reload --port 8000
 
-# 前端(热更新,代理到 :8000)
+# 前端（热更新，代理到 :8000）
 cd frontend && npm run dev
 
-# 桌面外壳
-python desktop.py --port 8000
-
-# 质量门禁(CI 跑的同一套)
-cd backend && python -m ruff check . && python -m pytest
-cd frontend && npx eslint src && npx tsc --noEmit && npm test && npm run build
+# 类型检查与构建
+cd frontend && npx tsc --noEmit && npm run build
 
 # 导出音画同步回归检查
 python tools/check_export_sync.py exports/xxx.mp4 --audio localdata/<歌名>/audio.mp3
 ```
 
-主要接口:
+接口一览：`/api/sources`、`/api/search`、`/api/uploads`、`/api/build`、`/api/build-text`、
+`/api/jobs/{id}`、`/api/songs`、`/api/songs/{name}`、`/api/audio/{name}`、`/api/export`、
+`/api/exports`、`/api/export/env`、`/api/export/fix`、`/api/export/install-chromium`、
+`/api/models/status`、`/api/models/install`、`/api/ui/background`。
 
-- 配置:`/api/sources`、`/api/search`、`/api/uploads`、`/api/build`、`/api/build-text`
-- 任务:`/api/jobs`、`/api/jobs/{id}`、`/api/jobs/{id}/cancel`、`/api/jobs/{id}/events`(SSE)
-- 数据集:`/api/songs`、`/api/songs/{name}`(GET/PATCH/DELETE)、`/api/audio/{name}`
-- 导出:`/api/export`、`/api/export/presets`、`/api/export/env`、`/api/export/fix`、
-  `/api/export/install-chromium`、`/api/exports`、`/api/exports/reveal`
-- 扩展包:`/api/models/status`、`/api/models/install`
-- 设置:`/api/settings`、`/api/settings/test-proxy`、`/api/about`、`/api/diagnostics`
-- 更新:`/api/update/check`、`/api/update/apply`、`/api/update/rollback`
-- 生词本:`/api/vocab`(GET/POST/DELETE)
-- 背景:`/api/ui/background`
-
-测试:后端 221 个 pytest 用例、前端 47 个 vitest 用例;CI 还会在 Windows 上构建
-便携包并跑一次启动冒烟。
+---
 
 ## 许可与署名
 
-本项目以 **GNU General Public License v3.0** 发布,全文见 [`LICENSE`](LICENSE)。
-随发行包分发的第三方组件(ffmpeg、whisper、opus-mt、词典等)的许可与署名,
-见 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+本项目以 **GNU General Public License v3.0** 发布，全文见 [`LICENSE`](LICENSE)。
 
 `backend/app/qrc_des.py` 是从
 [LDDC](https://github.com/chenmozhijin/LDDC)（GPL-3.0）移植的 QQ 音乐 QRC 解密实现，
