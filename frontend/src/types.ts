@@ -92,12 +92,16 @@ export interface SongMeta {
   vocal_separation?: string;
   source?: string;
   source_kind?: string;
-  /** whether audio.mp3 actually exists for this dataset */
+  /** whether the dataset actually carries an audio file */
   has_audio?: boolean;
+  /** the audio file name inside the folder, e.g. audio.flac */
+  audio_file?: string;
   /** seconds the lyric timeline is shifted against the audio; positive plays
    *  the highlight later, negative earlier (-2 … 2, one decimal) */
   time_offset?: number;
   trans_hidden?: boolean;
+  /** song-wide display layers; a missing key means "visible" */
+  view?: Record<string, boolean>;
 }
 
 export interface SongData {
@@ -211,4 +215,20 @@ export interface AboutInfo {
   paths: { app: string; data: string; exports: string };
   packs: { custom_lyrics: boolean; chromium: boolean };
   dev: boolean;
+}
+
+/** one saved encounter in the personal word book */
+export interface VocabEntry {
+  song: string;
+  song_title: string;
+  segment_id: number;
+  text: string;
+  kana: string;
+  romaji: string;
+  pos: string;
+  jlpt: string;
+  zh: string;
+  line: string;
+  at: number;
+  added_at: number;
 }

@@ -8,7 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app import repo
+from app import repo, vocab
 from app.builder import retime_words
 from app.datasets import dataset, list_datasets
 from app.dicts import analyze, enrich, find_grammar, parse_reading_marks
@@ -64,7 +64,11 @@ _WRITABLE_KEYS = {
 # shifts the whole lyric timeline against the audio (positive = lyrics later);
 # it lives in the dataset so the export recorder, which reloads song_data.json,
 # plays with the same correction the user tuned by ear.
-_META_KEYS = {"time_offset", "trans_hidden"}
+# Song-wide view state. v1 kept these in two places (localStorage for the card
+# row, meta for the gloss), so copying a dataset to another machine — or opening
+# it in the pywebview window — lost one of them. `view` is the single copy now.
+_VIEW_KEYS = {"cards", "translation", "furigana", "romaji", "next_line"}
+_META_KEYS = {"time_offset", "trans_hidden", "view"}
 TIME_OFFSET_MAX = 2.0
 
 
@@ -184,8 +188,27 @@ def _patch_meta(name: str, patch: dict, request: Request) -> dict:
                 meta["trans_hidden"] = True
             else:
                 meta.pop("trans_hidden", None)
+        if "view" in patch:
+            raw = patch["view"]
+            if raw is None:
+                meta.pop("view", None)
+            elif isinstance(raw, dict):
+                view = meta.setdefault("view", {})
+                for key, value in raw.items():
+                    if key not in _VIEW_KEYS:
+                        continue
+                    # a visible layer is the default, so only store the "off"
+                    if value:
+                        view.pop(key, None)
+                    else:
+                        view[key] = False
+                if not view:
+                    meta.pop("view", None)
+            else:
+                raise HTTPException(status_code=400, detail="view 必须是对象")
         result["time_offset"] = meta.get("time_offset", 0.0)
         result["trans_hidden"] = bool(meta.get("trans_hidden"))
+        result["view"] = meta.get("view", {})
         result["revision"] = meta.get("revision", 0) + 1
 
     _save_song(path, mutate, _expected_revision(request))
@@ -202,3 +225,31 @@ def _reline_grammar(text: str) -> list[dict] | None:
     enrich(tokens)
     hits = find_grammar(text, tokens)
     return hits or None
+
+
+@router.get("/api/vocab")
+def api_vocab_list(song: str | None = None):
+    """The personal word book, newest first; `song` narrows it to one dataset."""
+    return {"items": vocab.list_all(song), "counts": vocab.count_by_song()}
+
+
+@router.post("/api/vocab")
+def api_vocab_add(item: dict):
+    try:
+        return vocab.add(item)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None
+
+
+@router.delete("/api/vocab/{song}/{segment_id}")
+def api_vocab_delete(song: str, segment_id: int, text: str = ""):
+    if not text:
+        raise HTTPException(status_code=400, detail="缺少单词")
+    if not vocab.remove(song, segment_id, text):
+        raise HTTPException(status_code=404, detail="生词本里没有这一条")
+    return {"deleted": True}
+
+
+@router.delete("/api/vocab")
+def api_vocab_clear(song: str | None = None):
+    return {"removed": vocab.clear(song)}

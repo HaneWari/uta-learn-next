@@ -5,6 +5,8 @@ import type { SyncState } from "../hooks/useSyncEngine";
 import { rubyGroups } from "../furigana";
 import { displayRomaji, lineRomaji } from "../lib/romaji";
 import { useSettings } from "../lib/settings";
+import { effectiveWords } from "../lib/words";
+import type { WordHit } from "./WordPopover";
 
 interface LyricsDisplayProps {
   segments: Segment[];
@@ -18,6 +20,8 @@ interface LyricsDisplayProps {
   onPatch?: (segId: number, body: Partial<Segment>) => Segment | undefined;
   /** hide the Chinese gloss; the dataset flag is the default, the URL wins */
   transHidden?: boolean;
+  /** click a word to look it up (disabled in render mode) */
+  onWordClick?: (hit: WordHit) => void;
 }
 
 /** The text the listener actually sees: the override wins over the aligned
@@ -117,11 +121,29 @@ interface WordViewProps {
   syncState: SyncState;
   activeRef: RefObject<HTMLSpanElement | null>;
   romaji: string;
+  /** null in export mode: the recorder must render, not interact */
+  onPick?: (word: WordTiming, e: React.MouseEvent) => void;
 }
 
-function WordView({ word, segmentId, wordIndex, syncState, activeRef, romaji }: WordViewProps) {
+function WordView({
+  word,
+  segmentId,
+  wordIndex,
+  syncState,
+  activeRef,
+  romaji,
+  onPick,
+}: WordViewProps) {
+  const pick = onPick
+    ? (e: React.MouseEvent) => {
+        // a click on a glyph is a lookup; a double click is still the line
+        // editor, so stop the first click from also seeking
+        e.stopPropagation();
+        onPick(word, e);
+      }
+    : undefined;
   return (
-    <span className="wordbox">
+    <span className="wordbox" onClick={pick}>
       <RubySurface
         word={word}
         renderChar={(ch, ci) => {
@@ -169,7 +191,7 @@ function NextLine({ segment }: { segment: Segment }) {
   );
 }
 
-export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false }: LyricsDisplayProps) {
+export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset = 0, onPatch, transHidden = false, onWordClick }: LyricsDisplayProps) {
   const [settings] = useSettings();
   const activeRef = useRef<HTMLSpanElement | null>(null);
   const cur = segments[syncState.displayIndex];
@@ -341,6 +363,17 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
                       syncState={syncState}
                       activeRef={activeRef}
                       romaji={displayRomaji(w, settings)}
+                      onPick={
+                        onWordClick && cur
+                          ? (word, e) =>
+                              onWordClick({
+                                word,
+                                segment: cur,
+                                x: e.clientX,
+                                y: e.clientY,
+                              })
+                          : undefined
+                      }
                     />
                   ))
                 ) : cur.lyric_override?.text != null ? (

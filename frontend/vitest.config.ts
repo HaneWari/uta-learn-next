@@ -6,7 +6,10 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   test: {
-    environment: "node",
+    // jsdom only for the shortcut/typing tests; the rest are pure functions and
+    // still run instantly. `environmentMatchGlobs` kept the split without a
+    // second config file.
+    environment: "jsdom",
     include: ["src/**/*.test.ts"],
   },
 });

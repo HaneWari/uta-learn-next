@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from "react";
+import { SPEEDS } from "../hooks/usePlayback";
 import type { RefObject, MouseEvent } from "react";
 
 interface PlayerProps {
   audioRef: RefObject<HTMLAudioElement | null>;
   audioSrc: string;
   hasAudio?: boolean;
+  /** current speed, owned by the stage so `[` / `]` can change it too */
+  rate?: number;
+  onRate?: (value: number) => void;
+  /** single-line loop is on */
+  looping?: boolean;
+  onToggleLoop?: () => void;
+  /** 跟读 mode is on */
+  shadow?: boolean;
+  onToggleShadow?: () => void;
 }
 
 function fmt(t: number) {
@@ -14,13 +24,31 @@ function fmt(t: number) {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-export function Player({ audioRef, audioSrc, hasAudio = true }: PlayerProps) {
+export function Player({
+  audioRef,
+  audioSrc,
+  hasAudio = true,
+  rate: controlledRate,
+  onRate,
+  looping = false,
+  onToggleLoop,
+  shadow = false,
+  onToggleShadow,
+}: PlayerProps) {
   const barRef = useRef<HTMLDivElement>(null);
   const knobRef = useRef<HTMLDivElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
   const [paused, setPaused] = useState(true);
-  const [rate, setRate] = useState(1);
+  const [localRate, setLocalRate] = useState(1);
+  const rate = controlledRate ?? localRate;
   const [speedOpen, setSpeedOpen] = useState(false);
+
+  // the controlled value can change from a shortcut, so mirror it onto the
+  // element rather than relying on the click handler alone
+  useEffect(() => {
+    const a = audioRef.current;
+    if (a) a.playbackRate = rate;
+  }, [audioRef, rate]);
 
   useEffect(() => {
     let raf = 0;
@@ -41,12 +69,9 @@ export function Player({ audioRef, audioSrc, hasAudio = true }: PlayerProps) {
     return () => cancelAnimationFrame(raf);
   }, [audioRef]);
 
-  const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
-
   const changeRate = (r: number) => {
-    setRate(r);
-    const a = audioRef.current;
-    if (a) a.playbackRate = r;
+    setLocalRate(r);
+    onRate?.(r);
   };
 
   const toggle = () => {
@@ -83,6 +108,22 @@ export function Player({ audioRef, audioSrc, hasAudio = true }: PlayerProps) {
                 <span className={`glyph ${paused ? "play" : "pause"}`} />
               </button>
               <span className="hint">逐字同步 · 空格 播放/暂停 · ← → ±5s</span>
+              <button
+                className={`modetoggle${looping ? " on" : ""}`}
+                onClick={onToggleLoop}
+                aria-pressed={looping}
+                title="单句循环 (R)"
+              >
+                单句循环
+              </button>
+              <button
+                className={`modetoggle${shadow ? " on" : ""}`}
+                onClick={onToggleShadow}
+                aria-pressed={shadow}
+                title="跟读模式 (F)"
+              >
+                跟读
+              </button>
               <div className={`speeds${speedOpen ? " open" : ""}`}>
                 <button
                   className="speed-toggle"

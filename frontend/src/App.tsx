@@ -9,6 +9,7 @@ import { ConfigPage } from "./components/ConfigPage";
 import { ExportEnvModal } from "./components/ExportEnvModal";
 import { OffsetModal } from "./components/OffsetModal";
 import { SettingsModal } from "./components/SettingsModal";
+import { VocabBook } from "./components/VocabBook";
 import { Stage } from "./components/Stage";
 import type { SongSummary, StageBackground } from "./types";
 import "./App.css";
@@ -36,6 +37,7 @@ export default function App() {
   const [offsetOpen, setOffsetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [saveFailure, setSaveFailure] = useState<SaveFailure | null>(null);
+  const [bookOpen, setBookOpen] = useState(false);
   const {
     songData,
     error,
@@ -43,6 +45,7 @@ export default function App() {
     patch: patchSegment,
     setTimeOffset,
     setTransHidden,
+    patchView,
   } = useSongData(song);
 
   const refresh = useCallback(() => {
@@ -254,6 +257,14 @@ export default function App() {
             </button>
 
             <button
+              className="exportbtn bgbtn"
+              onClick={() => setBookOpen(true)}
+              title="查看已收藏的单词"
+            >
+              生词本
+            </button>
+
+            <button
               className={`exportbtn${exporting || envChecking ? " busy" : ""}`}
               onClick={() => void runExport()}
               disabled={!song || exporting || envChecking}
@@ -324,6 +335,22 @@ export default function App() {
       )}
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {bookOpen && (
+        <VocabBook
+          onClose={() => setBookOpen(false)}
+          onPlaySong={(name, at) => {
+            play(name);
+            // let the stage mount before seeking into it
+            window.setTimeout(() => {
+              const audio = document.querySelector("audio");
+              if (audio) {
+                audio.currentTime = Math.max(0, at);
+                void audio.play();
+              }
+            }, 350);
+          }}
+        />
+      )}
 
       {recovered && (
         <div className="export-toast" role="status">
@@ -381,6 +408,7 @@ export default function App() {
             background={background}
             onPatchSegment={patchSegment}
             onPatchTrans={(hidden) => void setTransHidden(hidden, true)}
+            onPatchView={(view) => void patchView(view)}
           />
         )}
       </div>

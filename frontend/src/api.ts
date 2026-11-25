@@ -7,6 +7,7 @@ import type {
   SongSummary,
   StageBackground,
   UploadInfo,
+  VocabEntry,
 } from "./types";
 
 // relative paths: the vite dev server proxies /api and /poc to :8000
@@ -65,6 +66,21 @@ export const api = {
   about: () => fetch(`${BASE}/api/about`).then((r) => json<AboutInfo>(r)),
 
   diagnosticsUrl: () => `${BASE}/api/diagnostics`,
+
+  /* personal word book — global file, so it survives dataset deletion */
+  vocab: (song?: string) =>
+    fetch(`${BASE}/api/vocab${song ? `?song=${encodeURIComponent(song)}` : ""}`).then(
+      (r) => json<{ items: VocabEntry[]; counts: Record<string, number> }>(r),
+    ),
+
+  addVocab: (item: Partial<VocabEntry>) =>
+    post<VocabEntry>("/api/vocab", item),
+
+  removeVocab: (entry: VocabEntry) =>
+    fetch(
+      `${BASE}/api/vocab/${encodeURIComponent(entry.song)}/${entry.segment_id}?text=${encodeURIComponent(entry.text)}`,
+      { method: "DELETE", headers: writeHeaders() },
+    ).then((r) => json<{ deleted: boolean }>(r)),
 
   /* jobs v2: cancel + the SSE stream (polling stays as the fallback) */
   cancelJob: (id: string) =>
@@ -197,6 +213,14 @@ export const api = {
       headers: writeHeaders({ "content-type": "application/json" }),
       body: JSON.stringify({ trans_hidden: hidden }),
     }).then((r) => json<{ trans_hidden: boolean }>(r)),
+
+  /* any other display layer (cards, furigana, romaji, next line) */
+  setView: (name: string, view: Record<string, boolean>) =>
+    fetch(`${BASE}/api/songs/${encodeURIComponent(name)}`, {
+      method: "PATCH",
+      headers: writeHeaders({ "content-type": "application/json" }),
+      body: JSON.stringify({ view }),
+    }).then((r) => json<{ view: Record<string, boolean> }>(r)),
 
   /* stage background: stored server-side so the export sees it too */
   background: () =>

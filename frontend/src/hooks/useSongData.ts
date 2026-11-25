@@ -24,6 +24,7 @@ export function useSongData(song: string | null) {
   const patchRef = useRef<(id: number, body: Partial<Segment>) => void>(() => {});
   const timeOffsetRef = useRef<(v: number, p: boolean) => void>(() => {});
   const transHiddenRef = useRef<(h: boolean, p: boolean) => void>(() => {});
+  const patchViewRef = useRef<(v: Record<string, boolean>) => void>(() => {});
 
   useEffect(() => {
     if (!song) return;
@@ -165,11 +166,34 @@ export function useSongData(song: string | null) {
     [song, updateData, current],
   );
 
+  /** Persist any other display layer (cards, furigana, romaji, next line). */
+  const patchView = useCallback(
+    (view: Record<string, boolean>): Promise<void> => {
+      if (!song) return Promise.resolve();
+      updateData((prev) => ({
+        ...prev,
+        meta: { ...prev.meta, view: { ...prev.meta.view, ...view } },
+      }));
+      return enqueue(`${song}:meta`, () => api.setView(song, view))
+        .then(() => {
+          clearFailure();
+        })
+        .catch((err: unknown) => {
+          reportFailure(
+            err instanceof Error ? err.message : String(err),
+            () => patchViewRef.current(view),
+          );
+        });
+    },
+    [song, updateData],
+  );
+
   useEffect(() => {
     patchRef.current = patch;
     timeOffsetRef.current = setTimeOffset;
     transHiddenRef.current = setTransHidden;
-  }, [patch, setTimeOffset, setTransHidden]);
+    patchViewRef.current = patchView;
+  }, [patch, setTimeOffset, setTransHidden, patchView]);
 
-  return { songData, error, loading, patch, setTimeOffset, setTransHidden };
+  return { songData, error, loading, patch, setTimeOffset, setTransHidden, patchView };
 }

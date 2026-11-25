@@ -1,6 +1,12 @@
 import { useRef, useEffect, useCallback, useState } from "react";
 import type { Segment, SongData, StageBackground } from "../types";
 import { useSyncEngine } from "../hooks/useSyncEngine";
+import { usePlayback } from "../hooks/usePlayback";
+import { resolveShortcut } from "../lib/shortcuts";
+import type { ShortcutAction } from "../lib/shortcuts";
+import { ShortcutHelp } from "./ShortcutHelp";
+import { WordPopover } from "./WordPopover";
+import type { WordHit } from "./WordPopover";
 import { Player } from "./Player";
 import { LyricsDisplay } from "./LyricsDisplay";
 import { VocabCards } from "./VocabCards";
@@ -23,50 +29,57 @@ interface Props {
   ) => Segment | undefined;
   /** persist the translation visibility flag (disabled in render mode) */
   onPatchTrans?: (hidden: boolean) => void;
+  /** persist any other display layer (disabled in render mode) */
+  onPatchView?: (view: Record<string, boolean>) => void;
 }
 
-export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment, onPatchTrans }: Props) {
+export function Stage({ songData, song, render = false, hasAudio, background, onPatchSegment, onPatchTrans, onPatchView }: Props) {
   const audioRef = useRef<HTMLAudioElement>(null);
-  // song-wide card visibility, remembered per dataset so a listener who only
-  // wants the lyrics can switch the vocab row off (and the export matches)
-  const [cardsHidden, setCardsHidden] = useState(
-    () => {
-      // the video-export page carries the flag in its URL because the headless
-      // recorder runs a fresh browser profile with no localStorage of ours
-      const q = new URLSearchParams(window.location.search).get("hidecards");
-      if (q !== null) return q === "1";
-      return localStorage.getItem(`hideCards:${song}`) === "1";
-    },
-  );
-  const toggleCards = useCallback(() => {
-    setCardsHidden((h) => {
-      const next = !h;
-      localStorage.setItem(`hideCards:${song}`, next ? "1" : "0");
-      return next;
-    });
-  }, [song]);
+  /* Song-wide view state. It lives in `meta.view` on the server rather than in
+     localStorage: a second browser, the pywebview window, or a copied dataset
+     would otherwise disagree, and the export would silently use another
+     layer set than the stage. The export page still accepts URL overrides
+     because its recorder profile has no access to the dataset's own state. */
+  const view = songData.meta.view ?? {};
+  const [viewChoice, setViewChoice] = useState<Record<string, boolean>>({});
+  const url = new URLSearchParams(window.location.search);
+  const urlFlag = (name: string) => {
+    const q = url.get(name);
+    return q === null ? undefined : q === "1";
+  };
+  const layerHidden = (key: string, urlName: string): boolean => {
+    // priority: this session's click → URL (recorder) → dataset → visible
+    if (key in viewChoice) return viewChoice[key];
+    const fromUrl = urlFlag(urlName);
+    if (fromUrl !== undefined) return fromUrl;
+    return view[key] === false;
+  };
 
-  /* same idea for the translation: a dataset meta flag the export also
-     reads, so the video shows exactly the gloss state the listener left.
-     The click is stored per song rather than mirrored into an effect — the
-     dataset flag stays the source of truth for every song the user has not
-     toggled in this session, and the export URL still wins for the recorder. */
-  const [transChoice, setTransChoice] = useState<{
-    song: string;
-    hidden: boolean;
-  } | null>(null);
-  const urlHidden = new URLSearchParams(window.location.search).get("hidetrans");
+  const cardsHidden = layerHidden("cards", "hidecards");
   const transHidden =
-    transChoice?.song === song
-      ? transChoice.hidden
-      : urlHidden === null
-        ? !!songData.meta.trans_hidden
-        : urlHidden === "1";
+    layerHidden("translation", "hidetrans") || !!songData.meta.trans_hidden;
+
+  // the refs keep the handlers stable while still reading the current
+  // visibility — otherwise the keyboard listener is rebuilt every render.
+  // Assigning inside an effect (not during render) keeps the hooks lint happy.
+  const cardsHiddenRef = useRef(cardsHidden);
+  const transHiddenRef = useRef(transHidden);
+  useEffect(() => {
+    cardsHiddenRef.current = cardsHidden;
+    transHiddenRef.current = transHidden;
+  }, [cardsHidden, transHidden]);
+
+  const toggleCards = useCallback(() => {
+    const next = !cardsHiddenRef.current;
+    setViewChoice((prev) => ({ ...prev, cards: next }));
+    onPatchView?.({ cards: !next });
+  }, [onPatchView]);
+
   const toggleTrans = useCallback(() => {
-    const next = !transHidden;
-    setTransChoice({ song, hidden: next });
+    const next = !transHiddenRef.current;
+    setViewChoice((prev) => ({ ...prev, translation: next }));
     onPatchTrans?.(next);
-  }, [transHidden, song, onPatchTrans]);
+  }, [onPatchTrans]);
   // hidden lines are left in the dataset but skipped everywhere the timeline
   // is consumed — the sync engine, the lyric display and the vocab row all
   // see the same filtered segment list, so a removed line just never plays.
@@ -81,36 +94,86 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
   const withAudio =
     hasAudio ?? songData.meta.has_audio ?? songData.meta.duration_seconds > 0;
 
-  const handleKey = useCallback((e: KeyboardEvent) => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA") return;
+  const playback = usePlayback(audioRef, visibleSegments);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [wordHit, setWordHit] = useState<WordHit | null>(null);
 
-    switch (e.code) {
-      case "Space":
-        e.preventDefault();
-        if (audio.paused) audio.play();
-        else audio.pause();
-        break;
-      case "ArrowLeft":
-        e.preventDefault();
-        audio.currentTime = Math.max(0, audio.currentTime - SEEK_STEP);
-        break;
-      case "ArrowRight":
-        e.preventDefault();
-        audio.currentTime = Math.min(
-          audio.duration || 0,
-          audio.currentTime + SEEK_STEP,
-        );
-        break;
-    }
-  }, []);
+  const handleAction = useCallback(
+    (action: ShortcutAction) => {
+      const audio = audioRef.current;
+      const at = visibleSegments[syncState.displayIndex];
+      switch (action) {
+        case "toggle-play":
+          if (!audio) return;
+          if (audio.paused) void audio.play();
+          else audio.pause();
+          return;
+        case "seek-back":
+          if (audio) audio.currentTime = Math.max(0, audio.currentTime - SEEK_STEP);
+          return;
+        case "seek-forward":
+          if (audio) {
+            audio.currentTime = Math.min(
+              audio.duration || 0,
+              audio.currentTime + SEEK_STEP,
+            );
+          }
+          return;
+        case "prev-line":
+        case "next-line": {
+          if (!audio) return;
+          const dir = action === "prev-line" ? -1 : 1;
+          const index = Math.min(
+            visibleSegments.length - 1,
+            Math.max(0, syncState.displayIndex + dir),
+          );
+          audio.currentTime = visibleSegments[index]?.start ?? 0;
+          return;
+        }
+        case "rate-down":
+          playback.stepRate(-1);
+          return;
+        case "rate-up":
+          playback.stepRate(1);
+          return;
+        case "loop-line":
+          playback.toggleLoop(at ?? null);
+          return;
+        case "shadow":
+          playback.toggleShadow();
+          return;
+        case "toggle-trans":
+          toggleTrans();
+          return;
+        case "toggle-cards":
+          toggleCards();
+          return;
+        case "help":
+          setHelpOpen(true);
+          return;
+        case "close":
+          setHelpOpen(false);
+          return;
+        case "undo":
+          window.dispatchEvent(new CustomEvent("uta:undo"));
+          return;
+      }
+    },
+    [audioRef, playback, syncState.displayIndex, toggleCards, toggleTrans, visibleSegments],
+  );
 
   useEffect(() => {
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [handleKey]);
+    if (render) return;
+    const onKey = (e: KeyboardEvent) => {
+      const action = resolveShortcut(e);
+      if (!action) return;
+      // Space would otherwise scroll, arrows would scroll, "?" types nothing
+      if (action !== "undo") e.preventDefault();
+      handleAction(action);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleAction, render]);
 
   return (
     <div
@@ -137,6 +200,12 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
         audioRef={audioRef}
         audioSrc={audioSrc}
         hasAudio={withAudio}
+        rate={playback.rate}
+        onRate={playback.setRate}
+        looping={!!playback.loopSegment}
+        shadow={playback.shadow}
+        onToggleLoop={() => playback.toggleLoop(visibleSegments[syncState.displayIndex] ?? null)}
+        onToggleShadow={playback.toggleShadow}
       />
 
       <main className="main">
@@ -148,6 +217,7 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
           offset={songData.meta.time_offset ?? 0}
           transHidden={transHidden}
           onPatch={render ? undefined : onPatchSegment}
+          onWordClick={render ? undefined : setWordHit}
         />
         {/* the export recorder must never carry the collapsed bar, so the
             whole row is unmounted in render mode when cards are hidden */}
@@ -177,6 +247,24 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
         <span className="curtain-sub">{songData.meta.artist}</span>
         <span className="curtain-tail">UTA LEARN NEXT</span>
       </div>
+
+      {helpOpen && <ShortcutHelp onClose={() => setHelpOpen(false)} />}
+      {wordHit && (
+        <WordPopover
+          hit={wordHit}
+          song={song}
+          songTitle={songData.meta.title}
+          onClose={() => setWordHit(null)}
+          onSeek={() => {
+            const a = audioRef.current;
+            if (a) {
+              a.currentTime = Math.max(0, wordHit.segment.start - 0.05);
+              void a.play();
+            }
+            setWordHit(null);
+          }}
+        />
+      )}
     </div>
   );
 }
