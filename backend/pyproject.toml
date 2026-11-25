@@ -35,6 +35,11 @@ export = [
 gpu = [
     "torch>=2.2",
 ]
+# Desktop shell: one window instead of a console plus a browser tab. Without
+# it the app still runs — `desktop.py` falls back to the system browser.
+desktop = [
+    "pywebview>=5.0",
+]
 dev = [
     "ruff>=0.5",
     "pytest>=8.0",

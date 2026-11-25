@@ -21,9 +21,9 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import guard, jobs, logs, telemetry
+from app import guard, jobs, logs, telemetry, updater
 from app.api import config as config_api
-from app.api import export_api, packs_api, settings_api
+from app.api import export_api, packs_api, settings_api, update_api
 from app.api import songs as songs_api
 from app.api import stage as stage_api
 from app.datasets import prune_uploads
@@ -37,8 +37,12 @@ DEV, TOKEN, LOCAL_HOSTS = guard.DEV, guard.TOKEN, guard.LOCAL_HOSTS
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # a staged patch is swapped in before anything reads the app layer
+    applied = updater.apply_pending()
     logs.setup()
     logs.log().info("启动 %s %s", APP_NAME, APP_VERSION)
+    if applied:
+        logs.log().info("已应用更新 %s", applied)
     # jobs from the previous run come back as `interrupted` so the UI can show
     # "程序退出时未完成" instead of a 404 for a job id it still remembers
     restored = jobs.load_state()
@@ -84,7 +88,8 @@ app = FastAPI(title="Uta Learn Next API", lifespan=lifespan)
 
 guard.install(app)
 for router in (config_api.router, songs_api.router, packs_api.router,
-               export_api.router, settings_api.router, stage_api.router):
+               export_api.router, settings_api.router, update_api.router,
+               stage_api.router):
     app.include_router(router)
 
 # SPA last, so every /api route above wins over the static file fallback

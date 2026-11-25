@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
-from app import dicts  # noqa: E402
+from app import dicts
 
 DATA = Path(os.environ.get("UTALEARN_DATA_DIR", ROOT / "localdata"))
 DRY = "--apply" not in sys.argv

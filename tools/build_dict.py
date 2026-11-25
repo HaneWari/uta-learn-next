@@ -134,7 +134,6 @@ def main() -> int:
         if not kana and not kanji:
             stats["skipped"] += 1
             continue
-        head = kanji[0] if kanji else kana[0]
         # A headword with no kanji is its own reading; don't repeat it.
         reading = kana[0] if kana else ""
         level = jlpt.get(eid, "")

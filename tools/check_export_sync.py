@@ -95,7 +95,7 @@ def main() -> int:
     info = json.loads(subprocess.run(
         ["ffprobe", "-v", "quiet", "-print_format", "json",
          "-show_format", "-show_streams", str(video)],
-        capture_output=True, text=True).stdout)
+        capture_output=True, text=True, check=True).stdout)
     total = float(info["format"]["duration"])
     print(f"成片 {total:.2f}s")
 

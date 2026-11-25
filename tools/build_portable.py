@@ -36,10 +36,9 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import urllib.request
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,7 +136,7 @@ def install_packages(py: Path, base: Path) -> None:
         raise SystemExit(
             f"缺少 {REQUIREMENTS_LOCK}。先运行：\n"
             "  cd backend && uv lock && uv export --frozen --no-dev "
-            "--extra speech --extra export --no-emit-project --format requirements-txt "
+            "--extra speech --extra export --extra desktop --no-emit-project --format requirements-txt "
             "--hashes -o requirements.lock")
     pip_boot = download(GET_PIP, base.parent / "cache" / "get-pip.py", GET_PIP_SHA)
     say("安装 pip …")
@@ -245,7 +244,7 @@ def write_build_info(base: Path, ffmpeg_ver: str) -> dict:
         "app": "UtaLearn Next",
         "version": VERSION,
         "commit": commit,
-        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "runtime_id": runtime_id,
         "python": PY_VERSION,
         "requirements_sha256": req_sha,
@@ -259,51 +258,54 @@ def write_build_info(base: Path, ffmpeg_ver: str) -> dict:
 
 LAUNCHER_LINES = [
     "@echo off",
-    "REM 免安装启动器：不写注册表、不改 PATH、不需要管理员权限。",
+    "REM 免安装启动器:不写注册表、不改 PATH、不需要管理员权限。",
+    "REM 默认用 pythonw 启动桌面窗口;需要看日志时用「(控制台)」那个入口。",
     "setlocal",
     'cd /d "%~dp0"',
     'set "PYTHONHOME=%~dp0python"',
     'set "PYTHONPATH=%~dp0python;%~dp0python\\Lib\\site-packages"',
     'if exist "%~dp0browsers" set "PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers"',
-    "REM 语音识别模型放在 models/ 下（自定义歌词扩展包解压进来即是）；设了",
-    "REM HF_HOME 后 huggingface_hub 也优先用它，扩展包与缓存共用一处。",
+    "REM 语音识别模型放在 models/ 下(自定义歌词扩展包解压进来即是);设了",
+    "REM HF_HOME 后 huggingface_hub 也优先用它,扩展包与缓存共用一处。",
     'if not defined HF_HOME set "HF_HOME=%~dp0models"',
-    "REM 选一个空闲端口：8000 被占时会静默连到别的实例，导出/数据就落到别处去了。",
-    'set "PORT=8000"',
-    'for /l %%P in (8000,1,8010) do (',
-    "  netstat -ano | findstr /RC:\":%%P .*LISTENING\" >nul || (",
-    '    set "PORT=%%P"',
-    "    goto :portok",
-    "  )",
-    ")",
-    ":portok",
-    'set "UTALEARN_BASE_URL=http://127.0.0.1:%PORT%"',
-    "REM 歌词源/whisper 模型要联网。系统代理不一定会写进 *_PROXY 环境变量，",
-    "REM 而 httpx/huggingface 只认 env——探测常见本地代理端口并显式导出，",
-    "REM 让有 Clash/V2Ray 的机器开箱即用，没代理的机器则直连不受影响。",
-    'if not defined HTTPS_PROXY for %%P in (7890 7897 10808 1080 8889 8888 8080 4780) do (',
+    "REM 歌词源/whisper 模型要联网。系统代理不一定会写进 *_PROXY 环境变量,",
+    "REM 而 httpx 只认 env——探测常见本地代理端口并显式导出,让有 Clash/V2Ray",
+    "REM 的机器开箱即用,没代理的机器则直连不受影响。",
+    'if not defined HTTPS_PROXY for %%P in (7890 7897 10808 1080 8889 4780) do (',
     "  if not defined HTTPS_PROXY (",
     '    "%~dp0python\\python.exe" -c "import socket,sys;s=socket.socket();s.settimeout(0.25);sys.exit(0 if s.connect_ex((\'127.0.0.1\',%%P))==0 else 1)" 2>nul',
     '    if not errorlevel 1 set "HTTPS_PROXY=http://127.0.0.1:%%P"',
     "  )",
     ")",
     'if defined HTTPS_PROXY if not defined HTTP_PROXY set "HTTP_PROXY=%HTTPS_PROXY%"',
-    "REM 后端要先起来再开浏览器，否则用户看到的是连接拒绝。uvicorn 放到后台，",
-    "REM 轮询首页通了才 start 页面；60 秒还没起来就把错误留在窗口里。",
-    "cd backend",
-    'start /b "" "%~dp0python\\python.exe" -m uvicorn main:app --host 127.0.0.1 --port %PORT%',
-    'set "READY="',
-    "for /l %%I in (1,1,60) do (",
-    "  if not defined READY (",
-    '    "%~dp0python\\python.exe" -c "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen(\'http://127.0.0.1:%PORT%/\',timeout=1).status==200 else 1)" 2>nul && set "READY=1"',
-    "    if not defined READY timeout /t 1 /nobreak >nul",
-    "  )",
+    "REM desktop.py 负责选端口、等后端就绪、开窗口;窗口起不来就退回系统浏览器。",
+    'if /i "%~1"=="--console" (',
+    '  "%~dp0python\\python.exe" "%~dp0desktop.py"',
+    ") else (",
+    '  "%~dp0python\\pythonw.exe" "%~dp0desktop.py"',
     ")",
-    'start "" http://127.0.0.1:%PORT%/',
-    "echo.",
-    "echo Uta Learn Next is running. Close this window to stop it.",
-    "REM 等待后台 uvicorn 结束（关窗/退出码非零），然后收尾",
-    "pause >nul",
+]
+
+CONSOLE_LAUNCHER_LINES = [
+    "@echo off",
+    "REM 调试入口:保留控制台,能看到后端日志。",
+    'cd /d "%~dp0"',
+    'set "PYTHONHOME=%~dp0python"',
+    'set "PYTHONPATH=%~dp0python;%~dp0python\\Lib\\site-packages"',
+    'if exist "%~dp0browsers" set "PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers"',
+    'if not defined HF_HOME set "HF_HOME=%~dp0models"',
+    '"%~dp0python\\python.exe" "%~dp0desktop.py"',
+    "pause",
+]
+
+VBS_LINES = [
+    "' 双击这个文件启动 Uta Learn Next,不出现控制台窗口。",
+    "' 出问题需要看日志时,改用「启动 Uta Learn Next (控制台).cmd」。",
+    'Set fso = CreateObject("Scripting.FileSystemObject")',
+    "root = fso.GetParentFolderName(WScript.ScriptFullName)",
+    'Set shell = CreateObject("WScript.Shell")',
+    "shell.CurrentDirectory = root",
+    'shell.Run Chr(34) & root & "\\python\\pythonw.exe" & Chr(34) & " " & Chr(34) & root & "\\desktop.py" & Chr(34), 0, False',
 ]
 
 
@@ -312,6 +314,12 @@ def write_launcher(base: Path) -> None:
     # binary write: text mode turns \r\n into \r\r\n on Windows
     p.write_bytes(("\r\n".join(LAUNCHER_LINES) + "\r\n").encode("utf-8"))
     say(f"已生成 {p.name}")
+    console = base / "启动 Uta Learn Next (控制台).cmd"
+    console.write_bytes(("\r\n".join(CONSOLE_LAUNCHER_LINES) + "\r\n").encode("utf-8"))
+    vbs = base / "启动 Uta Learn Next.vbs"
+    vbs.write_bytes(("\r\n".join(VBS_LINES) + "\r\n").encode("utf-8"))
+    shutil.copy2(ROOT / "desktop.py", base / "desktop.py")
+    say("已生成 desktop.py 与三个启动入口")
 
 
 def make_zip(base: Path, out: Path, extra: dict[str, Path] | None = None) -> Path:
@@ -433,6 +441,66 @@ def _translate_snapshot() -> Path:
     return d
 
 
+def make_patch_zip(base: Path, out: Path) -> Path:
+    """Application layer only: backend/, frontend/dist/, desktop.py.
+
+    A patch never touches `python/`, `bin/`, `models/`, `browsers/` or
+    `localdata/` — those are the runtime, the extension packs and the user's
+    own data. Keeping the patch this narrow is what makes it a few MB and safe
+    to apply over any v2.x install.
+    """
+    include = ("backend/", "frontend/dist/")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()
+    say(f"打包补丁 {out.name} …")
+    total = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        for folder in include:
+            src = base / folder
+            if not src.is_dir():
+                continue
+            for f in src.rglob("*"):
+                if not f.is_file() or "__pycache__" in f.parts:
+                    continue
+                z.write(f, f"{folder}{f.relative_to(src)}")
+                total += 1
+        desktop = base / "desktop.py"
+        if desktop.exists():
+            z.write(desktop, "desktop.py")
+            total += 1
+    say(f"  {total} 个文件,{out.stat().st_size / 1048576:.1f} MB")
+    return out
+
+
+def make_update_manifest(base: Path, patch: Path, full: Path, out: Path,
+                         notes: str = "") -> Path:
+    """`update.json`: version, runtime_id and both assets with hashes."""
+    info = json.loads((base / "BUILD_INFO.json").read_text(encoding="utf-8"))
+    manifest = {
+        "schema": 1,
+        "version": info["version"],
+        "released_at": datetime.now(UTC).date().isoformat(),
+        "notes": notes,
+        "runtime_id": info["runtime_id"],
+        "patch": {
+            "name": patch.name,
+            "size": patch.stat().st_size,
+            "sha256": sha256_file(patch),
+            "min_version": "2.0.0",
+        },
+        "full": {
+            "name": full.name,
+            "size": full.stat().st_size,
+            "sha256": sha256_file(full),
+        },
+    }
+    out.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+                   encoding="utf-8")
+    say(f"已生成 {out.name}")
+    return out
+
+
 def make_custom_lyrics_zip(out: Path) -> Path:
     """Standalone zip: `models/whisper-small/…` + `models/translate-ja-zh/…`.
 
@@ -473,6 +541,7 @@ def main() -> int:
     ap.add_argument("--browsers-dir", default=None, help="Chromium 安装位置（默认构建目录旁）")
     ap.add_argument("--custom-pack", action="store_true",
                     help="只生成自定义歌词扩展包 whisper+翻译（版本无关，一次构建长期复用）")
+    ap.add_argument("--notes", default="", help="update.json 里的更新说明")
     ap.add_argument("--ci", action="store_true",
                     help="CI 冒烟：只生成目录，不装 Chromium、不打 zip")
     args = ap.parse_args()
@@ -498,6 +567,9 @@ def main() -> int:
     copy_tree(ROOT / "frontend" / "dist", base / "frontend" / "dist")
     for name in ("README.md", "LICENSE"):
         shutil.copy2(ROOT / name, base / name)
+    # the desktop shell lives at the app root: it owns the port choice, the
+    # readiness wait and the pywebview window
+    shutil.copy2(ROOT / "desktop.py", base / "desktop.py")
     say("已复制代码与前端产物")
 
     py = build_python(base)
@@ -513,7 +585,10 @@ def main() -> int:
         return 0
 
     zip_root = Path(args.zip_out).resolve() if args.zip_out else out_root
-    make_zip(base, zip_root / f"UtaLearnNext-{VERSION}.zip")
+    full = make_zip(base, zip_root / f"UtaLearnNext-{VERSION}.zip")
+    patch = make_patch_zip(base, zip_root / f"UtaLearnNext-{VERSION}-patch.zip")
+    make_update_manifest(base, patch, full, zip_root / "update.json",
+                         notes=args.notes)
 
     if not args.no_chromium:
         bdir = Path(args.browsers_dir).resolve() if args.browsers_dir else None
