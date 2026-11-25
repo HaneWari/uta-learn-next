@@ -21,10 +21,14 @@ learning app (FastAPI backend + React/Vite frontend, packaged as a no-install po
   (segments, word timings, vocab overrides, `meta.view`). Schema v2: every file carries
   `schema_version` and `revision`; all writes go through `app/repo.py`.
   `localdata/` and `exports/` are gitignored.
-- **Build** — `tools/build_portable.py` emits the portable zip, a ~1 MB app-layer patch
-  zip, `update.json` and `SHA256SUMS.txt`. A patch may only contain `backend/` and
-  `frontend/dist/`. The build prunes pip/setuptools/onnxruntime and ships **only**
-  `ffmpeg.exe` — duration comes from `binaries.probe_duration`, so there is no ffprobe.
+- **Build** — `tools/build_portable.py` emits the portable zip, `latest.json` (the
+  update manifest the app reads — never a human download) and `SHA256SUMS.txt`. A
+  patch is only built when `--patch-from <version>` says an older build can install
+  it: the release that first ships the updater has nothing to patch *from*, so it
+  must not carry a patch asset. The build prunes pip/setuptools/onnxruntime, ships
+  **only** `ffmpeg.exe` (duration comes from `binaries.probe_duration`, no ffprobe),
+  re-quantises the whisper pack to int8 (~461 → 237 MB) and drops Playwright's
+  `chrome-headless-shell` from the Chromium pack (~333 → 209 MB).
 
 ## How to run
 
@@ -94,6 +98,9 @@ cd frontend && npx eslint src && npx tsc --noEmit && npm test && npm run build
   filter chain produced zero frames (happened when the progress-bar calibration read the
   card row's orange accent in portrait). `_has_video()` guards both muxes; keep that
   check when touching the calibration path.
+- **`no_recorder` is not a failure** — the frame renderer needs no Playwright video
+  component, so `env_check` returns `ok` with `compat_ready: false` on such a machine.
+  Only `no_playwright` / `no_browser` / `no_ffmpeg` block an export.
 - **whisper is an extension pack** — `fallback._transcribe_chunked` loads a bundled
   `models/whisper-small/` straight off disk. The model is *never* pulled from
   HuggingFace — a missing pack is a hard, actionable error, and the config page can
@@ -136,7 +143,7 @@ cd frontend && npx eslint src && npx tsc --noEmit && npm test && npm run build
 
 - `npx tsc --noEmit` must pass before touching anything else in the frontend.
 - `ruff check backend/` for backend style (line length 100, py312).
-- `python -m pytest` in `backend/` — 293 tests, fully offline (lyric sources are faked).
+- `python -m pytest` in `backend/` — 300 tests, fully offline (lyric sources are faked).
   `npm test` in `frontend/` — vitest, 84 cases.
 - `tools/check_export_sync.py` is the regression harness for audio-video timing — run
   it when touching `export.py`.

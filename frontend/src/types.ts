@@ -170,15 +170,17 @@ export interface Job {
 
 export interface ExportEnv {
   ok: boolean;
-  /** ok | no_playwright | no_browser | no_recorder | no_ffmpeg */
-  state: "ok" | "no_playwright" | "no_browser" | "no_recorder" | "no_ffmpeg";
+  /** `no_recorder` no longer occurs: the frame renderer needs no recorder */
+  state: "ok" | "no_playwright" | "no_browser" | "no_ffmpeg";
   checks: {
     playwright: boolean;
     browser_path: string | null;
     bundled_chromium: boolean;
     browser_launch: boolean;
     launch_error: string;
+    /** whether 兼容模式 could record (not needed by the default path) */
     record_video: boolean;
+    compat_ready?: boolean;
     record_error: string;
     ffmpeg: boolean;
     candidates: string[];

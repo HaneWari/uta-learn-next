@@ -123,8 +123,7 @@ def api_export_fix():
         progress(0.98, "完成")
         return {"ok": c["ok"], "state": c["state"], "env": c,
                 "needs_restart": c["ok"],
-                "needs_extension": c["state"] in ("no_browser", "no_playwright",
-                                                 "no_recorder")}
+                "needs_extension": c["state"] in ("no_browser", "no_playwright")}
 
     jobs.run(jid, work)
     return {"job_id": jid}

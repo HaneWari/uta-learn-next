@@ -2835,6 +2835,10 @@ body {
 /* ---------- settings ---------- */
 
 /* local lyric file import (5.3.2) */
+.env-checks li.dim {
+  opacity: 0.55;
+}
+
 .crash {
   max-width: 620px;
   margin: 8vh auto;

@@ -57,6 +57,30 @@ class TestPresetsApi:
         assert (fourk["width_px"], fourk["height_px"]) == (3840, 2160)
 
 
+class TestEnvCheck:
+    """§5.4.2: the recorder component must not gate the default path."""
+
+    def test_a_missing_recorder_no_longer_fails_the_probe(self, monkeypatch):
+        monkeypatch.setattr(export, "pick_browser", lambda *a, **k: ("chrome.exe", ""))
+        monkeypatch.setattr(export, "probe_record_video", lambda *a, **k: (False, "no ffmpeg"))
+        monkeypatch.setattr(export.binaries, "find", lambda name: "ffmpeg")
+        env = export.env_check()
+        assert env["ok"] is True
+        assert env["state"] == "ok"
+        # still reported, because 兼容模式 needs it
+        assert env["checks"]["compat_ready"] is False
+
+    def test_a_missing_browser_still_fails(self, monkeypatch):
+        monkeypatch.setattr(export, "pick_browser", lambda *a, **k: (None, "boom"))
+        monkeypatch.setattr(export.binaries, "find", lambda name: "ffmpeg")
+        assert export.env_check()["state"] == "no_browser"
+
+    def test_a_missing_ffmpeg_still_fails(self, monkeypatch):
+        monkeypatch.setattr(export, "pick_browser", lambda *a, **k: ("chrome.exe", ""))
+        monkeypatch.setattr(export.binaries, "find", lambda name: None)
+        assert export.env_check()["state"] == "no_ffmpeg"
+
+
 class TestClipValidation:
     def test_a_short_clip_is_rejected(self, client, make_song):
         make_song("song")

@@ -137,7 +137,7 @@ def custom_lyrics_installed(root: Path | None = None) -> bool:
 
 def install_custom_lyrics(progress=None) -> Path:
     root = install_asset(CUSTOM_ASSET, "models", progress=progress,
-                         label="自定义歌词扩展包（约 500MB）")
+                         label="自定义歌词扩展包（约 265MB）")
     if not whisper_installed(root):
         raise RuntimeError("解压后未找到 models/whisper-small/model.bin")
     if not translate_installed(root):
@@ -160,7 +160,7 @@ def chromium_installed(root: Path | None = None) -> bool:
 
 def install_chromium(progress=None) -> Path:
     root = install_asset(CHROMIUM_ASSET, "browsers", progress=progress,
-                         label="Chromium 扩展包（约 316MB）")
+                         label="Chromium 扩展包（约 209MB）")
     if not chromium_installed(root):
         raise RuntimeError("解压后未找到 browsers/chromium-* 目录")
     return browsers_dir(root)

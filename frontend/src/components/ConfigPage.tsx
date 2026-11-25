@@ -607,7 +607,7 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                   <>
                     <div className="model-banner-text">
                       <strong>自定义歌词需要模型扩展包</strong>
-                      <span>含语音识别 + 日中翻译模型，约 490MB，一次性下载即可离线使用（不随版本更新）</span>
+                      <span>含语音识别 + 日中翻译模型，约 265MB，一次性下载即可离线使用（不随版本更新）</span>
                     </div>
                     <div className="model-banner-actions">
                       <button

@@ -27,7 +27,10 @@ from app.sources import resolve_proxy
 from app.version import APP_VERSION
 
 REPO = "HaneWari/uta-learn-next"
-MANIFEST_ASSET = "update.json"
+# The manifest is read by the app, never by a human: it is named so it cannot
+# be mistaken for something to download by hand. `latest.json` also sorts away
+# from the archives, so the release page leads with the packages a user wants.
+MANIFEST_ASSET = "latest.json"
 STAGING = APP_ROOT / "_update"
 BACKUP = APP_ROOT / "app.prev"
 # `state.json` lives inside STAGING; computed at call time so a test (or a
@@ -40,7 +43,7 @@ def _state_file() -> Path:
 
 
 class NoManifest(RuntimeError):
-    """The latest release predates the updater, so it has no `update.json`."""
+    """The latest release predates the updater, so it has no manifest."""
 
 
 def local_runtime_id() -> str:
@@ -65,7 +68,7 @@ def is_newer(candidate: str, current: str = APP_VERSION) -> bool:
 
 
 def fetch_manifest(timeout: float = 10.0) -> dict:
-    """The newest release's `update.json` (the only file this reads).
+    """The newest release's `latest.json` (the only file this reads).
 
     A release published before the updater existed has no manifest. That is
     the normal state of the world until the first v2 release ships, so it is

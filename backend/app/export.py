@@ -282,16 +282,17 @@ def probe_record_video(exe: str, timeout_ms: int = _PROBE_TIMEOUT) -> tuple[bool
 def env_check() -> dict:
     """Detailed environment diagnosis for the export feature.
 
-    Returns a machine-readable `state` plus the concrete checks so the UI can
-    decide which fix to offer:
-
-      ok           — a Chromium browser launched fine, export will work
+      ok            — a Chromium browser launched fine, export will work
       no_playwright — the python package itself is missing → offer pip fix
-      no_browser   — playwright is there but nothing launches → offer the
-                     bundled-Chromium extension pack
-      no_recorder  — browser launches but can't record video (missing the
-                     playwright ffmpeg component) → playwright repair
-      no_ffmpeg    — browser is fine but the mux tool is missing
+      no_browser    — playwright is there but nothing launches → offer the
+                      bundled-Chromium extension pack
+      no_ffmpeg     — browser is fine but the mux tool is missing
+
+    `no_recorder` is no longer a failure state. The frame renderer drives CDP
+    and pipes screenshots into ffmpeg, so Playwright's own video/ffmpeg
+    component is only needed by 兼容模式 — and telling a user "视频录制组件错误"
+    while the picture path is healthy was one of the failure classes §5.4.2 set
+    out to delete. The probe is still reported, as `compat_ready`.
     """
     try:
         import playwright  # noqa: F401
@@ -304,22 +305,20 @@ def env_check() -> dict:
         exe, launch_err = pick_browser()
     launch_ok = exe is not None
 
-    record_ok, record_err = (False, "")
-    if launch_ok:
-        record_ok, record_err = probe_record_video(exe)
-
     has_ffmpeg = binaries.find("ffmpeg") is not None
 
     if not has_playwright:
         state = "no_playwright"
-    elif launch_ok and record_ok and has_ffmpeg:
-        state = "ok"
     elif not launch_ok:
         state = "no_browser"
-    elif not record_ok:
-        state = "no_recorder"
-    else:
+    elif not has_ffmpeg:
         state = "no_ffmpeg"
+    else:
+        state = "ok"
+
+    record_ok, record_err = (False, "")
+    if launch_ok and state == "ok":
+        record_ok, record_err = probe_record_video(exe)
 
     return {
         "ok": state == "ok",
@@ -334,6 +333,7 @@ def env_check() -> dict:
             "record_error": record_err,
             "ffmpeg": has_ffmpeg,
             "candidates": _chrome_candidates() if has_playwright else [],
+            "compat_ready": bool(launch_ok and record_ok and has_ffmpeg),
         },
     }
 
