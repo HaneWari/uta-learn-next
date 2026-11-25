@@ -38,7 +38,13 @@ def dump_openapi() -> str:
     os.environ.setdefault("UTALEARN_DEV", "1")
     import main  # noqa: PLC0415  (the path above has to be set first)
 
-    return json.dumps(main.app.openapi(), ensure_ascii=False)
+    spec = main.app.openapi()
+    # `/__no_dist` only exists when the front end has not been built (see
+    # main.py), so it made the generated file depend on whether someone ran
+    # `npm run build` first — CI's backend job has no dist, a dev box does.
+    # It is a debug route, not part of the API surface.
+    spec["paths"].pop("/__no_dist", None)
+    return json.dumps(spec, ensure_ascii=False)
 
 
 def main() -> int:
