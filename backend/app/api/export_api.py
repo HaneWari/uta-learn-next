@@ -14,7 +14,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from app import export, jobs
+from app import export, jobs, render_frames, settings
 from app.datasets import audio_duration, dataset, find_audio, meta_flag
 from app.paths import APP_ROOT, BASE_URL, EXPORT_DIR
 from app.schemas import ExportRequest, RevealRequest
@@ -239,7 +239,11 @@ async def api_export(payload: ExportRequest, request: Request):
     jid = jobs.create("export", "export")
 
     def work(progress):
-        export.render(
+        # 兼容模式 keeps the old screen recorder for machines where frame
+        # capture misbehaves; the default is the deterministic frame renderer
+        compat = bool(settings.get("export_compat", False))
+        renderer = export.render if compat else render_frames.render
+        renderer(
             base_url=_base_url(request),
             song=name,
             audio=audio,
@@ -250,10 +254,12 @@ async def api_export(payload: ExportRequest, request: Request):
             clip_start=clip_start,
             extra_query=("&hidecards=1" if hide_cards else "")
             + ("&hidetrans=1" if hide_trans else ""),
+            **({} if compat else {"pages": int(settings.get("export_pages", 3) or 3)}),
         )
         return {"file": out.name, "url": f"/api/exports/{out.name}",
                 "size": out.stat().st_size, "duration": duration,
                 "dir": str(out.parent), "path": str(out), "fps": export.FPS,
+                "renderer": "compat" if compat else "frames",
                 "preset": preset_name, "clip_start": clip_start,
                 "width": export.preset(preset_name)["width"]
                 * export.preset(preset_name)["scale"],

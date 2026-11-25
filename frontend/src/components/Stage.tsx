@@ -104,7 +104,8 @@ export function Stage({ songData, song, render = false, hasAudio, background, on
   // see the same filtered segment list, so a removed line just never plays.
   const visibleSegments = songData.segments.filter((s) => !s.hidden);
   const visibleData: SongData = { ...songData, segments: visibleSegments };
-  const { syncState, clockRef } = useSyncEngine(visibleData, audioRef);
+  // the export page hands time over to the renderer frame by frame
+  const { syncState, clockRef } = useSyncEngine(visibleData, audioRef, render);
   const audioSrc = `/api/audio/${encodeURIComponent(song)}`;
   const custom = background?.mode === "custom" && !!background.url;
   // The dataset's own flag wins; otherwise use the list endpoint's answer, and

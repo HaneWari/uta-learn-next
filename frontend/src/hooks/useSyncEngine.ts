@@ -57,6 +57,8 @@ function search<T>(items: T[], time: number, key: (item: T) => number): number {
 export function useSyncEngine(
   songData: SongData | null,
   audioRef: React.RefObject<HTMLAudioElement | null>,
+  /** frame-accurate render mode: ignore the audio element, follow the clock */
+  virtualClock = false,
 ) {
   const [syncState, setSyncState] = useState<SyncState>(INITIAL);
   const rafRef = useRef<number>(0);
@@ -116,6 +118,30 @@ export function useSyncEngine(
     // playhead, so the synthetic clock ignores it.
     const offset = songData.meta.time_offset ?? 0;
     const virt = { t: 0, last: performance.now() };
+
+    // In render mode the exporter drives time by hand: no rAF, no audio, just
+    // `seek(t)`. That is what makes a frame depend only on `t` and not on how
+    // busy the machine was while it rendered (§5.4.2).
+    if (virtualClock) {
+      clockRef.current = 0;
+      sync(0, totalDur);
+      const api = {
+        seek: (t: number) => {
+          const clamped = Math.max(0, Math.min(totalDur, t));
+          clockRef.current = clamped;
+          lastTimeRef.current = clamped;
+          sync(clamped, totalDur);
+        },
+        duration: () => totalDur,
+      };
+      (window as unknown as { __utaSeek?: typeof api }).__utaSeek = api;
+      // the exporter polls this instead of guessing when the stage is ready
+      (window as unknown as { __utaReady?: boolean }).__utaReady = true;
+      return () => {
+        delete (window as unknown as { __utaSeek?: typeof api }).__utaSeek;
+        delete (window as unknown as { __utaReady?: boolean }).__utaReady;
+      };
+    }
 
     function tick() {
       const audio = audioRef.current;
@@ -220,7 +246,7 @@ export function useSyncEngine(
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [flatKana, audioRef, songData]);
+  }, [flatKana, audioRef, songData, virtualClock]);
 
   return { syncState, clockRef };
 }
