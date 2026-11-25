@@ -175,13 +175,29 @@ export const api = {
       json<{ file: string; size: number; created: number; url: string }[]>(r),
     ),
 
+  revealExport: (file?: string) =>
+    post<{ opened: string }>("/api/exports/reveal", { file: file ?? null }),
+
+  deleteExport: (file: string) =>
+    fetch(`${BASE}/api/exports/${encodeURIComponent(file)}`, {
+      method: "DELETE",
+      headers: writeHeaders(),
+    }).then((r) => json<{ deleted: string }>(r)),
+
   // `hideCards` rides along so the headless recorder page (a fresh browser
   // profile that can't see this window's localStorage) hides the vocab row
   // exactly like the stage the user is looking at.
-  startExport: (song: string, hideCards = false) =>
+  startExport: (
+    song: string,
+    hideCards = false,
+    opts: { preset?: string; clipStart?: number; clipEnd?: number } = {},
+  ) =>
     post<{ job_id: string; file: string }>("/api/export", {
       song,
       hide_cards: hideCards,
+      preset: opts.preset,
+      clip_start: opts.clipStart,
+      clip_end: opts.clipEnd,
     }),
 
   remove: (name: string) =>

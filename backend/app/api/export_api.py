@@ -11,7 +11,7 @@ import time
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from app import export, jobs
@@ -19,6 +19,7 @@ from app.datasets import audio_duration, dataset, find_audio, meta_flag
 from app.paths import APP_ROOT, BASE_URL, EXPORT_DIR
 
 router = APIRouter()
+DEFAULT_PRESET_FOR_EXPORT = export.DEFAULT_PRESET
 
 
 @router.get("/api/export/env")
@@ -30,6 +31,20 @@ def api_export_env():
     shows up without an app restart.
     """
     return export.env_check()
+
+
+@router.get("/api/export/presets")
+def api_export_presets():
+    """The three fixed-60fps presets, with a time estimate for a given song."""
+    return {
+        "default": export.DEFAULT_PRESET,
+        "fps": export.FPS,
+        "presets": [
+            {"id": key, **value, "width_px": value["width"] * value["scale"],
+             "height_px": value["height"] * value["scale"]}
+            for key, value in export.PRESETS.items()
+        ],
+    }
 
 
 @router.post("/api/export/fix")
@@ -120,17 +135,55 @@ def api_exports():
         return []
     out = []
     for f in sorted(EXPORT_DIR.glob("*.mp4"), key=lambda x: -x.stat().st_mtime):
+        st = f.stat()
         out.append({
             "file": f.name,
-            "size": f.stat().st_size,
-            "created": int(f.stat().st_mtime),
+            "size": st.st_size,
+            "created": int(st.st_mtime),
             "url": f"/api/exports/{f.name}",
         })
     return out
 
 
+@router.post("/api/exports/reveal")
+def api_export_reveal(payload: dict | None = None):
+    """Open the export folder in the OS file manager.
+
+    Only the folder itself — no path from the request is honoured, so this can
+    never be turned into "open anything on this machine".
+    """
+    import subprocess
+    import sys
+
+    EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+    name = (payload or {}).get("file")
+    if sys.platform == "win32":
+        if name:
+            subprocess.Popen(["explorer", "/select,", str(EXPORT_DIR / name)])
+        else:
+            subprocess.Popen(["explorer", str(EXPORT_DIR)])
+    elif sys.platform == "darwin":
+        target = str(EXPORT_DIR / name) if name else str(EXPORT_DIR)
+        subprocess.Popen(["open", "-R", target] if name else ["open", target])
+    else:
+        subprocess.Popen(["xdg-open", str(EXPORT_DIR)])
+    return {"opened": str(EXPORT_DIR)}
+
+
+def _base_url(request: Request) -> str:
+    """Where the recorder should open the stage.
+
+    The launcher picks the first free port in 8000–8010, so a hardcoded 8000
+    meant an export launched on 8011 recorded a dead page. Prefer the explicit
+    env override, then the address the request itself arrived on.
+    """
+    if BASE_URL:
+        return BASE_URL
+    return str(request.base_url).rstrip("/")
+
+
 @router.post("/api/export")
-async def api_export(payload: dict):
+async def api_export(payload: dict, request: Request):
     """Record the stage for one dataset and mux its audio into an MP4."""
     name = (payload.get("song") or "").strip()
     if not name:
@@ -153,6 +206,24 @@ async def api_export(payload: dict):
     if duration <= 0:
         raise HTTPException(status_code=400, detail="这个数据集没有时间轴，无法导出")
 
+    # a clip export: both ends must sit inside the audio, and the order matters
+    try:
+        clip_start = max(0.0, float(payload.get("clip_start") or 0))
+    except (TypeError, ValueError):
+        clip_start = 0.0
+    try:
+        requested = float(payload.get("clip_end") or 0)
+    except (TypeError, ValueError):
+        requested = 0.0
+    clip_end = duration if requested <= 0 else min(requested, duration)
+    if clip_end - clip_start < 1.0:
+        raise HTTPException(status_code=400, detail="片段至少要有 1 秒")
+    duration = clip_end - clip_start
+
+    preset_name = payload.get("preset") or DEFAULT_PRESET_FOR_EXPORT
+    if preset_name not in export.PRESETS:
+        preset_name = DEFAULT_PRESET_FOR_EXPORT
+
     safe = re.sub(r"[^\w.\-]+", "-", name)[:60]
     stamp = time.strftime("%Y%m%d-%H%M%S")
     out = EXPORT_DIR / f"{safe}-{stamp}.mp4"
@@ -168,18 +239,25 @@ async def api_export(payload: dict):
 
     def work(progress):
         export.render(
-            base_url=BASE_URL,
+            base_url=_base_url(request),
             song=name,
             audio=audio,
             out=out,
             duration=duration,
             progress=progress,
+            preset_name=preset_name,
+            clip_start=clip_start,
             extra_query=("&hidecards=1" if hide_cards else "")
             + ("&hidetrans=1" if hide_trans else ""),
         )
         return {"file": out.name, "url": f"/api/exports/{out.name}",
                 "size": out.stat().st_size, "duration": duration,
-                "dir": str(out.parent), "path": str(out), "fps": export.FPS}
+                "dir": str(out.parent), "path": str(out), "fps": export.FPS,
+                "preset": preset_name, "clip_start": clip_start,
+                "width": export.preset(preset_name)["width"]
+                * export.preset(preset_name)["scale"],
+                "height": export.preset(preset_name)["height"]
+                * export.preset(preset_name)["scale"]}
 
     jobs.run(jid, work)
     return {"job_id": jid, "file": out.name}

@@ -24,6 +24,34 @@ from . import binaries
 W, H = 1920, 1080
 FPS = 60
 
+# Three presets, all fixed 60 fps. 4K reuses the 1080p layout with
+# `device_scale_factor=2` instead of a second stylesheet — same arrangement,
+# twice the pixels, nothing extra to maintain.
+PRESETS: dict[str, dict] = {
+    "landscape": {"label": "横屏 1080p", "width": 1920, "height": 1080, "scale": 1},
+    "portrait": {"label": "竖屏 1080p", "width": 1080, "height": 1920, "scale": 1},
+    "4k": {"label": "4K 横屏", "width": 1920, "height": 1080, "scale": 2},
+}
+DEFAULT_PRESET = "landscape"
+
+
+def preset(name: str | None) -> dict:
+    return PRESETS.get(name or DEFAULT_PRESET, PRESETS[DEFAULT_PRESET])
+
+
+def estimate_seconds(duration: float, preset_name: str | None = None,
+                     pages: int = 3) -> int:
+    """Rough wall-clock estimate for the export dialog.
+
+    Numbers come from the recording path's measured throughput: ~55 ms per
+    1080p frame and ~150 ms per 4K frame, divided across the parallel pages.
+    It is an estimate and the dialog says so — being 30% off is fine, being
+    silent for ten minutes is not.
+    """
+    per_frame = 0.150 if (preset_name or DEFAULT_PRESET) == "4k" else 0.055
+    frames = max(1.0, duration) * FPS
+    return int(frames * per_frame / max(1, pages))
+
 # The recorder sometimes stops a little before the requested length (frame drops,
 # a slow first paint). The video track is padded by cloning its last frame for up
 # to this many seconds so it can never end before the audio does — that gap was
@@ -349,8 +377,14 @@ def _bar_played(img, duration: float) -> float | None:
     return None
 
 
-def measure_offset(video: Path, duration: float, work: Path) -> float | None:
-    """Median (content time - frame time) in seconds, or None if unreadable."""
+def measure_offset(video: Path, duration: float, work: Path,
+                   base: float = 0.0) -> float | None:
+    """Median (content time - frame time) in seconds, or None if unreadable.
+
+    `base` is where the recorded clip starts in the song: the progress bar
+    reads the *absolute* playhead, so a clip that begins at 1:30 would look
+    like a +90s drift without it.
+    """
     import numpy as np
 
     span = max(1.0, duration)
@@ -362,7 +396,7 @@ def measure_offset(video: Path, duration: float, work: Path) -> float | None:
         except Exception:  # noqa: BLE001
             continue
         if played is not None:
-            deltas.append(played - t)
+            deltas.append(played - base - t)
     return float(np.median(deltas)) if deltas else None
 
 
@@ -379,8 +413,26 @@ def _probe_duration(video: Path) -> float:
         return 0.0
 
 
+def _has_video(path: Path) -> bool:
+    """True when the container really carries a video stream.
+
+    ffmpeg happily writes an audio-only MP4 when the filter chain produced
+    zero frames, which is how a bad calibration pass could turn a
+    "successful" export into a file with no picture at all.
+    """
+    try:
+        out = subprocess.run(
+            [binaries.ffprobe(), "-v", "quiet", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        return "video" in out
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _mux(raw: Path, audio: Path | None, out: Path, duration: float,
-         skip: float, scale: float = 1.0) -> None:
+         skip: float, scale: float = 1.0, audio_offset: float = 0.0) -> None:
     """Trim, re-time and mux.
 
     `scale` corrects a real defect in the recorder: the WebM it produces is not
@@ -395,6 +447,9 @@ def _mux(raw: Path, audio: Path | None, out: Path, duration: float,
         cmd += ["-ss", f"{skip:.3f}"]
     cmd += ["-i", str(raw)]
     if audio is not None and audio.exists():
+        if audio_offset > 0.02:
+            # a clip export starts mid-song: cut the audio at the same instant
+            cmd += ["-ss", f"{audio_offset:.3f}"]
         cmd += ["-i", str(audio), "-map", "0:v:0", "-map", "1:a:0",
                 "-c:a", "aac", "-b:a", "192k"]
     else:
@@ -413,8 +468,15 @@ def _mux(raw: Path, audio: Path | None, out: Path, duration: float,
 
 
 def render(base_url: str, song: str, audio: Path | None, out: Path,
-           duration: float, progress=None, extra_query: str = "") -> Path:
-    """Record `?song=<song>&render=1` and write `out` as 60 fps H.264 + AAC."""
+           duration: float, progress=None, extra_query: str = "",
+           preset_name: str = DEFAULT_PRESET,
+           clip_start: float = 0.0) -> Path:
+    """Record `?song=<song>&render=1` and write `out` as 60 fps H.264 + AAC.
+
+    `clip_start` + `duration` describe the slice to record: playback begins at
+    `clip_start`, the audio is cut at the same instant, and the progress-bar
+    calibration is offset by it.
+    """
     from playwright.sync_api import sync_playwright
 
     p = progress or (lambda frac, msg: None)
@@ -425,6 +487,7 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
 
     out.parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="utaexport_"))
+    size = preset(preset_name)
     # Quote the name: a title like "Q&A" or "#1" (both survive slugify) would
     # otherwise become a query separator or a fragment and the recorder would
     # open the wrong song — or an empty stage.
@@ -450,10 +513,10 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
                 raise RuntimeError(
                     "没有能启动的 Chromium 浏览器：" + (err or "未找到候选"))
             ctx = browser.new_context(
-                viewport={"width": W, "height": H},
-                device_scale_factor=1,
+                viewport={"width": size["width"], "height": size["height"]},
+                device_scale_factor=size["scale"],
                 record_video_dir=str(work),
-                record_video_size={"width": W, "height": H},
+                record_video_size={"width": size["width"], "height": size["height"]},
             )
             # recording starts here — everything until play() is dead air
             t_record = time.monotonic()
@@ -474,10 +537,11 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
 
             p(0.08, "开始播放…")
             page.evaluate(
-                """() => {
+                """(start) => {
                     const a = document.querySelector('audio');
-                    if (a) { a.currentTime = 0; a.play(); }
-                }"""
+                    if (a) { a.currentTime = start; a.play(); }
+                }""",
+                clip_start,
             )
             t_play = time.monotonic()
             # the frozen prefix in the recording
@@ -492,11 +556,12 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
                 page.wait_for_timeout(500)
                 waited += 0.5
                 done = page.evaluate(
-                    """() => {
+                    """(end) => {
                         const a = document.querySelector('audio');
                         if (!a) return true;
-                        return a.ended || (a.duration && a.currentTime >= a.duration - 0.15);
-                    }"""
+                        return a.ended || a.currentTime >= end;
+                    }""",
+                    clip_start + duration - 0.1,
                 )
                 p(min(0.88, 0.10 + 0.78 * min(waited, duration) / max(1.0, duration)),
                   "录制中…")
@@ -528,24 +593,40 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
             # bad probe, not a real stretch
             if not (0.90 <= scale <= 1.10):
                 scale = 1.0
-        _mux(raw, audio, out, duration, skip, scale)
+        _mux(raw, audio, out, duration, skip, scale, clip_start)
 
         if not out.exists() or out.stat().st_size < 1024:
             raise RuntimeError("ffmpeg 没有生成有效的视频")
+        if not _has_video(out):
+            raise RuntimeError(
+                "导出结果只有音轨，没有画面。请重试；若仍失败，"
+                "可在设置 → 导出里打开兼容模式。")
 
         # The wall-clock offset is only an estimate: the recorder's first frame
         # does not land exactly at new_context(). Read the progress bar back out
         # of the result and correct once, so picture and audio really agree.
         p(0.95, "校准音画对齐…")
-        residual = measure_offset(out, duration, work)
+        residual = measure_offset(out, duration, work, clip_start)
         if residual is not None and abs(residual) > 0.12:
             # residual > 0 means the picture is ahead of the audio, so trim
             # less of the raw recording (not more).
             corrected = max(0.0, skip - residual)
-            p(0.97, f"重新对齐（偏差 {residual:+.2f}s）…")
-            _mux(raw, audio, out, duration, corrected, scale)
-            residual = measure_offset(out, duration, work)
-            skip = corrected
+            # A reading can be nonsense when another orange element sits on the
+            # bottom row (the portrait layout puts the cards there). Trimming
+            # past the end of the recording would leave zero frames, so only
+            # accept a correction that still keeps the clip.
+            if raw_span and corrected < raw_span - 0.5:
+                p(0.97, f"重新对齐(偏差 {residual:+.2f}s)...")
+                _mux(raw, audio, out, duration, corrected, scale, clip_start)
+                if _has_video(out):
+                    residual = measure_offset(out, duration, work, clip_start)
+                    skip = corrected
+                else:
+                    # never ship audio-only: fall back to the first mux
+                    _mux(raw, audio, out, duration, skip, scale, clip_start)
+                    residual = None
+            else:
+                p(0.97, "跳过音画微调（读取结果不可信）")
 
         p(0.99, "完成" + (f"（残余偏差 {residual:+.2f}s）" if residual is not None else ""))
         return out

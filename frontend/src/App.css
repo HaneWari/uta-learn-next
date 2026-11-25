@@ -2904,6 +2904,145 @@ body {
 }
 
 /* word lookup popover */
+.exportmodal {
+  width: min(600px, 100%);
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 6px 0 14px;
+}
+
+.preset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(178, 146, 116, 0.34);
+  background: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.preset.on {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 3px rgba(255, 138, 61, 0.16);
+}
+
+.preset-label {
+  font-size: 13.5px;
+  color: #33291f;
+}
+
+.preset-note {
+  font-size: 11px;
+  color: rgba(120, 96, 72, 0.88);
+}
+
+.clip-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: rgba(96, 76, 58, 0.9);
+}
+
+.clip-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.clip-row .setinput {
+  min-width: 0;
+  width: 100%;
+}
+
+.clip-len {
+  padding-bottom: 7px;
+  font-variant-numeric: tabular-nums;
+}
+
+.exportmodal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.exportlist {
+  width: min(720px, 100%);
+  max-height: min(620px, 86vh);
+  display: flex;
+  flex-direction: column;
+}
+
+.exportrows {
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.exportrow {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(178, 146, 116, 0.28);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.exportrow-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: #3a2e22;
+}
+
+.exportrow-meta {
+  font-size: 11px;
+  color: rgba(120, 96, 72, 0.9);
+  white-space: nowrap;
+}
+
+.exportrow-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.exportrow-actions .btn {
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+html[data-theme="dark"] .exportrow {
+  background: rgba(60, 46, 36, 0.66);
+  border-color: rgba(214, 178, 140, 0.24);
+}
+
+html[data-theme="dark"] .exportrow-name {
+  color: #f1e4d4;
+}
+
+html[data-theme="dark"] .preset {
+  background: rgba(60, 46, 36, 0.7);
+  border-color: rgba(214, 178, 140, 0.26);
+}
+
+html[data-theme="dark"] .preset-label {
+  color: #f1e4d4;
+}
 .bookmodal {
   width: min(820px, 100%);
   height: min(680px, 88vh);

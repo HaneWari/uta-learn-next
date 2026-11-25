@@ -57,6 +57,8 @@ DEFAULT_SONG = os.environ.get("DEFAULT_SONG", "braveheart")
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus", ".wma", ".mp4"}
 MAX_UPLOAD = 200 * 1024 * 1024
 
-# Where the export's headless browser should reach this server. Override with
-# UTALEARN_BASE_URL when running behind a different host/port.
-BASE_URL = os.environ.get("UTALEARN_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+# Where the export's headless browser should reach this server. Usually derived
+# from the incoming request (`api_export`), because the launcher picks a free
+# port and a hardcoded 8000 made every export on :8011 hit a dead server.
+# UTALEARN_BASE_URL still wins when the app is fronted by a different address.
+BASE_URL = os.environ.get("UTALEARN_BASE_URL", "").rstrip("/")

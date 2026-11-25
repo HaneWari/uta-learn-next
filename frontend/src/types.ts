@@ -143,7 +143,12 @@ export interface UploadInfo {
 export interface Job {
   id: string;
   kind: string;
-  status: "queued" | "running" | "done" | "error";
+  /** jobs v2 adds cancel + restart recovery to the old four states */
+  status: "queued" | "running" | "done" | "error" | "canceled" | "interrupted";
+  /** scheduler resource: cpu / export / net */
+  resource?: string;
+  /** human-readable step, e.g. 下载 / 转写 / 渲染 */
+  stage?: string;
   progress: number;
   message: string;
   result: SongSummary & { segments: number } | null;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, waitForJob } from "./api";
 import { useSongData } from "./hooks/useSongData";
 import { useTheme } from "./lib/theme";
+import { useSettings } from "./lib/settings";
 import { onSaveFailure } from "./lib/saveQueue";
 import type { SaveFailure } from "./lib/saveQueue";
 import { BackgroundModal } from "./components/BackgroundModal";
@@ -10,6 +11,9 @@ import { ExportEnvModal } from "./components/ExportEnvModal";
 import { OffsetModal } from "./components/OffsetModal";
 import { SettingsModal } from "./components/SettingsModal";
 import { VocabBook } from "./components/VocabBook";
+import { ExportDialog } from "./components/ExportDialog";
+import { ExportList } from "./components/ExportList";
+import type { ExportChoice } from "./components/ExportDialog";
 import { Stage } from "./components/Stage";
 import type { SongSummary, StageBackground } from "./types";
 import "./App.css";
@@ -36,8 +40,11 @@ export default function App() {
   const [bgOpen, setBgOpen] = useState(false);
   const [offsetOpen, setOffsetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settings] = useSettings();
   const [saveFailure, setSaveFailure] = useState<SaveFailure | null>(null);
   const [bookOpen, setBookOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportListOpen, setExportListOpen] = useState(false);
   const {
     songData,
     error,
@@ -85,6 +92,50 @@ export default function App() {
     window.history.replaceState(null, "", url.toString());
   }, []);
 
+  /** Shared by the button and the env modal: start a background export. */
+  const startExportJob = useCallback(
+    async (choice: ExportChoice) => {
+      if (!song) return;
+      setExporting(true);
+      setExportPct(0);
+      try {
+        // the recorder's fresh browser profile can't read our local view state,
+        // so only the legacy hide-cards hint is sent; the server prefers
+        // `meta.view` anyway
+        const hideCards = localStorage.getItem(`hideCards:${song}`) === "1";
+        const { job_id } = await api.startExport(song, hideCards, {
+          preset: choice.preset,
+          clipStart: choice.clipStart > 0 ? choice.clipStart : undefined,
+          clipEnd: choice.clipEnd,
+        });
+        // the job runs server-side: closing this dialog does not stop it, and
+        // the toast below reports the result whenever it lands
+        const job = await waitForJob(
+          job_id,
+          (j) => setExportPct(Math.round(j.progress * 100)),
+          1200,
+        );
+        if (job.status === "error") {
+          setExportNote(job.error ?? "导出失败");
+        } else if (job.status === "canceled") {
+          setExportNote("已取消导出");
+        } else {
+          const result = job.result as { dir?: string; file?: string } | null;
+          setExportNote(
+            result?.dir
+              ? `已导出至 ${result.dir}\n${result.file ?? ""}`
+              : "导出完成",
+          );
+        }
+      } catch (e) {
+        setExportNote(e instanceof Error ? e.message : String(e));
+      } finally {
+        setExporting(false);
+      }
+    },
+    [song],
+  );
+
   const runExport = useCallback(async () => {
     if (!song || exporting) return;
     // Check the export environment first: a green probe falls straight through
@@ -106,34 +157,8 @@ export default function App() {
     } finally {
       setEnvChecking(false);
     }
-
-    setExporting(true);
-    setExportPct(0);
-    try {
-      // the hidden-cards flag has to reach the recorder page: its fresh
-      // browser profile can't see our localStorage, so it goes in the URL
-      const hideCards =
-        localStorage.getItem(`hideCards:${song}`) === "1";
-      const { job_id } = await api.startExport(song, hideCards);
-      const job = await waitForJob(
-        job_id,
-        (j) => setExportPct(Math.round(j.progress * 100)),
-        1200,
-      );
-      if (job.status === "error") {
-        setExportNote(job.error ?? "导出失败");
-      } else {
-        const dir = (job.result as { dir?: string } | null)?.dir;
-        const file = (job.result as { file?: string } | null)?.file;
-        setExportNote(
-          dir ? `已导出至 ${dir}\n${file ?? ""}` : "导出完成",
-        );
-      }
-    } catch (e) {
-      setExportNote(e instanceof Error ? e.message : String(e));
-    } finally {
-      setExporting(false);
-    }
+    // environment is fine: ask what to render rather than guessing
+    setExportOpen(true);
   }, [song, exporting]);
 
   const handleDeleted = useCallback(
@@ -265,6 +290,14 @@ export default function App() {
             </button>
 
             <button
+              className="exportbtn bgbtn"
+              onClick={() => setExportListOpen(true)}
+              title="已导出的视频"
+            >
+              导出记录
+            </button>
+
+            <button
               className={`exportbtn${exporting || envChecking ? " busy" : ""}`}
               onClick={() => void runExport()}
               disabled={!song || exporting || envChecking}
@@ -285,33 +318,9 @@ export default function App() {
           onClose={() => setEnvOpen(false)}
           onReady={() => {
             setEnvOpen(false);
-            // environment just turned green — run the export for real. Bypass
-            // the probe this time so a borderline check doesn't loop.
-            void (async () => {
-              if (!song) return;
-              setExporting(true);
-              setExportPct(0);
-              try {
-                const hideCards = localStorage.getItem(`hideCards:${song}`) === "1";
-                const { job_id } = await api.startExport(song, hideCards);
-                const job = await waitForJob(
-                  job_id,
-                  (j) => setExportPct(Math.round(j.progress * 100)),
-                  1200,
-                );
-                if (job.status === "error") {
-                  setExportNote(job.error ?? "导出失败");
-                } else {
-                  const dir = (job.result as { dir?: string } | null)?.dir;
-                  const file = (job.result as { file?: string } | null)?.file;
-                  setExportNote(dir ? `已导出至 ${dir}\n${file ?? ""}` : "导出完成");
-                }
-              } catch (e) {
-                setExportNote(e instanceof Error ? e.message : String(e));
-              } finally {
-                setExporting(false);
-              }
-            })();
+            // environment just turned green — ask what to render. Bypass the
+            // probe this time so a borderline check doesn't loop.
+            setExportOpen(true);
           }}
         />
       )}
@@ -335,6 +344,24 @@ export default function App() {
       )}
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {exportListOpen && (
+        <ExportList onClose={() => setExportListOpen(false)} />
+      )}
+      {exportOpen && songData && (
+        <ExportDialog
+          duration={
+            songData.meta.duration_seconds ||
+            (songData.segments[songData.segments.length - 1]?.end ?? 0)
+          }
+          settings={settings}
+          onClose={() => setExportOpen(false)}
+          onStart={(choice) => {
+            setExportOpen(false);
+            void startExportJob(choice);
+          }}
+        />
+      )}
+
       {bookOpen && (
         <VocabBook
           onClose={() => setBookOpen(false)}
