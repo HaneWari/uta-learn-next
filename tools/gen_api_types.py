@@ -76,13 +76,33 @@ def main() -> int:
 
 
 def _normalise(text: str) -> str:
-    """Ignore trailing whitespace and line endings when comparing.
+    """Compare the *types*, not the generated commentary.
 
-    The generator runs on Windows locally and Linux in CI; CRLF and trailing
-    spaces must not be treated as schema drift.
+    Two things legitimately differ between a Windows dev box and the Linux
+    runner: line endings, and how much doc text openapi-typescript copies out
+    of the schema (Python 3.14's typing spelling changes the `Format: binary`
+    note on an upload field). Neither is a schema change, so comments and blank
+    lines are stripped before the comparison — a real drift moves a type line
+    and still fails.
     """
-    lines = [line.rstrip() for line in text.replace("\r\n", "\n").split("\n")]
-    return "\n".join(lines).strip() + "\n"
+    out = []
+    in_block = False
+    for raw in text.replace("\r\n", "\n").split("\n"):
+        line = raw.rstrip()
+        stripped = line.strip()
+        if in_block:
+            if "*/" in stripped:
+                in_block = False
+            continue
+        if stripped.startswith("/**") and "*/" not in stripped:
+            in_block = True
+            continue
+        if stripped.startswith("//") or stripped.startswith("/**"):
+            continue
+        if not stripped:
+            continue
+        out.append(line)
+    return "\n".join(out) + "\n"
 
 
 def _first_diff(a: str, b: str) -> list[str]:
