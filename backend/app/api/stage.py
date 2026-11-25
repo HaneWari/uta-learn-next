@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, UploadFile
@@ -22,8 +23,15 @@ BG_MEDIA = {".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 
 @router.get("/")
 def health():
-    if (DIST_DIR / "index.html").exists():
-        return HTMLResponse(guard.index_html(DIST_DIR), headers=NO_CACHE)
+    # read the dist folder through the app module when it is importable, so a
+    # test (or a relocated build) that patches `main.DIST_DIR` is honoured
+    # instead of the constant bound at import time
+    dist = DIST_DIR
+    app_module = sys.modules.get("main")
+    if app_module is not None:
+        dist = getattr(app_module, "DIST_DIR", dist)
+    if (dist / "index.html").exists():
+        return HTMLResponse(guard.index_html(dist), headers=NO_CACHE)
     return {"status": "ok", "songs": list_datasets()}
 
 

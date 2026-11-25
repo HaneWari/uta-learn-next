@@ -126,6 +126,19 @@ def _save_soon() -> None:
     _save_timer.start()
 
 
+def cancel_pending_save() -> None:
+    """Drop a debounced write that has not fired yet.
+
+    Without this, a timer armed by a job can fire after the in-memory registry
+    was cleared (a test, or a shutdown) and write an empty snapshot over the
+    real one — the jobs then look lost on the next start.
+    """
+    global _save_timer
+    if _save_timer is not None:
+        _save_timer.cancel()
+        _save_timer = None
+
+
 def load_state() -> int:
     """Reload jobs from the previous run, marking unfinished ones interrupted.
 

@@ -13,6 +13,7 @@ def clean_registry():
     jobs.JOBS.clear()
     jobs._FUNCS.clear()
     yield
+    jobs.cancel_pending_save()
     jobs.JOBS.clear()
     jobs._FUNCS.clear()
 
@@ -142,6 +143,7 @@ class TestPersistence:
 
         jid = jobs.create("build", "cpu")
         jobs.update(jid, 0.3, "转写中")
+        jobs.cancel_pending_save()
         jobs._save_now()
         jobs.JOBS.clear()
 
@@ -157,6 +159,8 @@ class TestPersistence:
 
         jid = jobs.create("export", "export")
         jobs.finish(jid, {"file": "a.mp4"})
+        # the debounced timer can fire after the clear and overwrite the file
+        jobs.cancel_pending_save()
         jobs._save_now()
         jobs.JOBS.clear()
 
