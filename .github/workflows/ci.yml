@@ -26,6 +26,10 @@ jobs:
       # does not reach
       - run: uv run ruff check ../desktop.py ../tools
       - run: uv run pytest -q
+      # the generated API types must match the routes (5.7)
+      - run: uv run python ../tools/gen_api_types.py --check
+        env:
+          PYTHONIOENCODING: utf-8
 
   frontend:
     runs-on: ubuntu-latest

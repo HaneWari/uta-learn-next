@@ -91,7 +91,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [proxyNote, setProxyNote] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   /* update state: check · download · restart */
-  const [update, setUpdate] = useState<{
+  const [upd, setUpd] = useState<{
     checking: boolean;
     available: boolean;
     latest?: string;
@@ -137,10 +137,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   async function checkUpdate(force = true) {
-    setUpdate((u) => ({ ...u, checking: true, error: undefined }));
+    setUpd((u) => ({ ...u, checking: true, error: undefined }));
     try {
       const r = await api.updateCheck(force);
-      setUpdate({
+      setUpd({
         checking: false,
         available: !!r.available,
         latest: r.latest,
@@ -152,7 +152,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         pct: 0,
       });
     } catch (e) {
-      setUpdate((u) => ({
+      setUpd((u) => ({
         ...u,
         checking: false,
         error: e instanceof Error ? e.message : String(e),
@@ -161,28 +161,28 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   async function applyUpdate() {
-    setUpdate((u) => ({ ...u, applying: true, pct: 0 }));
+    setUpd((u) => ({ ...u, applying: true, pct: 0 }));
     try {
       const { job_id } = await api.updateApply();
       const done = await waitForJob(job_id, (j) =>
-        setUpdate((u) => ({ ...u, pct: Math.round(j.progress * 100) })),
+        setUpd((u) => ({ ...u, pct: Math.round(j.progress * 100) })),
       );
       if (done.status === "error") {
-        setUpdate((u) => ({
+        setUpd((u) => ({
           ...u,
           applying: false,
           error: done.error ?? "更新失败",
         }));
         return;
       }
-      setUpdate((u) => ({
+      setUpd((u) => ({
         ...u,
         applying: false,
         available: false,
         ready: "更新已准备好，重启后生效",
       }));
     } catch (e) {
-      setUpdate((u) => ({
+      setUpd((u) => ({
         ...u,
         applying: false,
         error: e instanceof Error ? e.message : String(e),
@@ -469,32 +469,32 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   <span className="setlabel">
                     版本更新
                     <span className="sethint">
-                      {update.ready
-                        ? update.ready
-                        : update.checking
+                      {upd.ready
+                        ? upd.ready
+                        : upd.checking
                           ? "检查中..."
-                          : update.available
-                            ? update.kind === "patch"
-                              ? `新版本 ${update.latest}（补丁，约 1MB）`
-                              : `新版本 ${update.latest}（运行时变化，需完整包）`
-                            : update.error
-                              ? `检查失败：${update.error}`
-                              : update.latest
+                          : upd.available
+                            ? upd.kind === "patch"
+                              ? `新版本 ${upd.latest}（补丁，约 1MB）`
+                              : `新版本 ${upd.latest}（运行时变化，需完整包）`
+                            : upd.error
+                              ? `检查失败：${upd.error}`
+                              : upd.latest
                                 ? "已是最新版本"
                                 : "启动时会静默检查一次"}
                     </span>
                   </span>
                   <div className="update-actions">
-                    {update.available && update.kind === "patch" && (
+                    {upd.available && upd.kind === "patch" && (
                       <button
                         className="btn primary"
                         onClick={() => void applyUpdate()}
-                        disabled={update.applying}
+                        disabled={upd.applying}
                       >
-                        {update.applying ? `下载中 ${update.pct}%` : "下载并更新"}
+                        {upd.applying ? `下载中 ${upd.pct}%` : "下载并更新"}
                       </button>
                     )}
-                    {update.available && update.kind === "full" && (
+                    {upd.available && upd.kind === "full" && (
                       <a
                         className="btn primary"
                         href="https://github.com/HaneWari/uta-learn-next/releases/latest"
@@ -507,7 +507,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     <button
                       className="btn"
                       onClick={() => void checkUpdate(true)}
-                      disabled={update.checking}
+                      disabled={upd.checking}
                     >
                       检查更新
                     </button>

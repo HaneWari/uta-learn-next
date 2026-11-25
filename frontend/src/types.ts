@@ -1,4 +1,12 @@
 /** One character with its own timing — the highlight granularity. */
+/* The API surface itself is generated (see `api-types.ts`); the hand-written
+   shapes below stay for the parts FastAPI cannot describe — the dataset file
+   it returns verbatim, and the UI's own view state. `ApiSchema` is re-exported
+   so a caller can type a response without importing the generated file. */
+import type { components } from "./api-types";
+
+export type ApiSchema = components["schemas"];
+
 export interface KanaChar {
   ch: string;
   start: number;

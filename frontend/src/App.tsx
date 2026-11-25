@@ -9,6 +9,7 @@ import { BackgroundModal } from "./components/BackgroundModal";
 import { ConfigPage } from "./components/ConfigPage";
 import { ExportEnvModal } from "./components/ExportEnvModal";
 import { OffsetModal } from "./components/OffsetModal";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { SettingsModal } from "./components/SettingsModal";
 import { VocabBook } from "./components/VocabBook";
 import { ExportDialog } from "./components/ExportDialog";
@@ -428,13 +429,17 @@ export default function App() {
       )}
 
       <div className="tab-body">
+        {/* one boundary per page: a crash in the stage must not take the
+            config page down with it (and vice versa) */}
         {tab === "config" ? (
-          <ConfigPage
-            songs={songs}
-            onRefresh={refresh}
-            onPlay={play}
-            onDeleted={handleDeleted}
-          />
+          <ErrorBoundary region="配置页" onReset={() => setTab("config")}>
+            <ConfigPage
+              songs={songs}
+              onRefresh={refresh}
+              onPlay={play}
+              onDeleted={handleDeleted}
+            />
+          </ErrorBoundary>
         ) : error && !songs.length ? (
           <p className="status">载入失败：{error}</p>
         ) : error ? (
@@ -442,6 +447,7 @@ export default function App() {
         ) : loading || !songData || !song ? (
           <p className="status">正在载入…</p>
         ) : (
+          <ErrorBoundary region="播放页" onReset={() => setSong(null)}>
           <Stage
             songData={songData}
             song={song}
@@ -471,6 +477,7 @@ export default function App() {
             }}
             canRealign={whisperReady}
           />
+          </ErrorBoundary>
         )}
       </div>
     </div>

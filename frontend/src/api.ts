@@ -294,14 +294,6 @@ export const api = {
       body: JSON.stringify({ trans_hidden: hidden }),
     }).then((r) => json<{ trans_hidden: boolean }>(r)),
 
-  /* any other display layer (cards, furigana, romaji, next line) */
-  setView: (name: string, view: Record<string, boolean>) =>
-    fetch(`${BASE}/api/songs/${encodeURIComponent(name)}`, {
-      method: "PATCH",
-      headers: writeHeaders({ "content-type": "application/json" }),
-      body: JSON.stringify({ view }),
-    }).then((r) => json<{ view: Record<string, boolean> }>(r)),
-
   /* stage background: stored server-side so the export sees it too */
   background: () =>
     fetch(`${BASE}/api/ui/background`).then((r) => json<StageBackground>(r)),
