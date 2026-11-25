@@ -89,13 +89,8 @@ def to_wav(src: str | Path, dst: str | Path | None = None) -> Path:
 
 
 def probe_duration(src: str | Path) -> float:
-    cmd = [binaries.ffprobe(), "-v", "error", "-show_entries", "format=duration",
-           "-of", "default=nw=1:nk=1", str(src)]
-    out = subprocess.run(cmd, check=True, capture_output=True, text=True).stdout
-    try:
-        return float(out.strip())
-    except ValueError:
-        return 0.0
+    """Duration via `ffmpeg -i`, so the package does not need ffprobe."""
+    return binaries.probe_duration(src)
 
 
 def to_wav_window(src: str | Path, start: float, end: float) -> Path:

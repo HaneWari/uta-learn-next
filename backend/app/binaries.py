@@ -41,3 +41,28 @@ def ffmpeg() -> str:
 
 def ffprobe() -> str:
     return find("ffprobe") or "ffprobe"
+
+
+def probe_duration(path, timeout: float = 20.0) -> float:
+    """Media duration in seconds, read from `ffmpeg -i`'s banner.
+
+    The portable build used to ship a second 104 MB binary just to answer this
+    one question. `ffmpeg -i <file>` prints `Duration: HH:MM:SS.xx` on stderr
+    for every format it can demux, so ffprobe is now optional — present on a
+    developer machine, absent from the package.
+    """
+    import re
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            [ffmpeg(), "-hide_banner", "-i", str(path)],
+            capture_output=True, text=True, timeout=timeout, check=False,
+        ).stderr
+    except (OSError, subprocess.SubprocessError):
+        return 0.0
+    m = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", out)
+    if not m:
+        return 0.0
+    hours, minutes, seconds = int(m.group(1)), int(m.group(2)), float(m.group(3))
+    return hours * 3600 + minutes * 60 + seconds

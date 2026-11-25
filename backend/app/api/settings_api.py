@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from app import guard, logs, packs, settings, telemetry
+from app import guard, legacy_import, logs, packs, settings, telemetry
 from app.paths import APP_ROOT, DATA_DIR, EXPORT_DIR
 from app.schemas import ProxyTestRequest, SettingsPatch
 from app.sources import resolve_proxy
@@ -117,3 +117,22 @@ def api_system_focus():
     """
     settings.save({"focus_requested_at": time.time()})
     return {"focused": True}
+
+
+@router.get("/api/legacy/scan")
+def api_legacy_scan():
+    """旧版本数据:扫描同级目录(§5.5.3)。"""
+    return {"candidates": legacy_import.candidates()}
+
+
+@router.post("/api/legacy/import")
+def api_legacy_import(payload: dict):
+    path = (payload.get("path") or "").strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="缺少目录")
+    try:
+        return legacy_import.import_from(path, bool(payload.get("move")))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="目录不存在") from None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from None

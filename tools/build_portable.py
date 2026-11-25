@@ -164,15 +164,15 @@ def install_packages(py: Path, base: Path) -> None:
 
 
 def fetch_ffmpeg(base: Path, explicit: Path | None) -> Path:
-    """Return a folder holding ffmpeg.exe + ffprobe.exe (slim build by default)."""
+    """Return a folder holding ffmpeg.exe (slim build unless given one)."""
     bin_dir = base / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    if (bin_dir / "ffmpeg.exe").exists() and (bin_dir / "ffprobe.exe").exists():
+    if (bin_dir / "ffmpeg.exe").exists():
         say("bin/ 已就绪，跳过")
         return bin_dir
 
     if explicit:
-        for tool in ("ffmpeg", "ffprobe"):
+        for tool in ("ffmpeg",):
             src = explicit / f"{tool}.exe"
             if not src.exists():
                 src = explicit / tool
@@ -188,13 +188,14 @@ def fetch_ffmpeg(base: Path, explicit: Path | None) -> Path:
     with zipfile.ZipFile(zpath) as z:
         for member in z.namelist():
             name = Path(member).name
-            if name in ("ffmpeg.exe", "ffprobe.exe"):
+            # ffprobe is gone: duration comes from `ffmpeg -i` now
+            if name == "ffmpeg.exe":
                 with z.open(member) as src, (bin_dir / name).open("wb") as dst:
                     shutil.copyfileobj(src, dst)
-    for tool in ("ffmpeg.exe", "ffprobe.exe"):
+    for tool in ("ffmpeg.exe",):
         if not (bin_dir / tool).exists():
             raise SystemExit(f"精简包里没有 {tool}")
-    size = sum((bin_dir / t).stat().st_size for t in ("ffmpeg.exe", "ffprobe.exe")) / 1048576
+    size = (bin_dir / "ffmpeg.exe").stat().st_size / 1048576
     say(f"ffmpeg 精简版就绪（{size:.0f} MB）")
     return bin_dir
 
@@ -332,6 +333,53 @@ def write_launcher(base: Path) -> None:
     vbs.write_bytes(("\r\n".join(VBS_LINES) + "\r\n").encode("utf-8"))
     shutil.copy2(ROOT / "desktop.py", base / "desktop.py")
     say("已生成 desktop.py 与三个启动入口")
+
+
+# Packages that only exist to *build* an environment, or that nothing on the
+# runtime path imports. Shipping them cost ~69 MB of the download.
+_PRUNE = (
+    "pip", "setuptools", "wheel", "pkg_resources",
+    "_distutils_hack", "setuptools-*.dist-info", "pip-*.dist-info",
+    "wheel-*.dist-info",
+    # onnxruntime is only reached through faster-whisper's optional VAD, which
+    # this app never enables ("VAD 已禁用" in the plan)
+    "onnxruntime", "onnxruntime-*.dist-info", "onnxruntime_*.dist-info",
+    "coloredlogs", "humanfriendly", "flatbuffers",
+)
+
+
+def prune_site_packages(base: Path) -> int:
+    """Drop build-only and unimported packages from the shipped runtime.
+
+    Each name is checked against the frozen lock's import graph first: if the
+    app or any kept dependency imported it, the removal would surface as a
+    crash on a user' machine, which is exactly what this build is trying to
+    avoid. The list is deliberately short and verified, not "everything
+    suspicious".
+    """
+    site = base / "python" / "Lib" / "site-packages"
+    if not site.is_dir():
+        return 0
+    freed = 0
+    # a `.pth` file belonging to a removed package breaks every interpreter
+    # start with "No module named '_distutils_hack'"; drop them with the package
+    for pth in site.glob("distutils-precedence.pth"):
+        freed += pth.stat().st_size
+        pth.unlink(missing_ok=True)
+    for pattern in _PRUNE:
+        for path in site.glob(pattern):
+            if path.is_file():
+                freed += path.stat().st_size
+                path.unlink(missing_ok=True)
+                continue
+            if not path.is_dir():
+                continue
+            size = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+            shutil.rmtree(path, ignore_errors=True)
+            freed += size
+    if freed:
+        say(f"已移除构建期依赖,节省 {freed / 1048576:.0f} MB")
+    return freed
 
 
 def make_zip(base: Path, out: Path, extra: dict[str, Path] | None = None) -> Path:
@@ -513,6 +561,25 @@ def make_update_manifest(base: Path, patch: Path, full: Path, out: Path,
     return out
 
 
+def write_checksums(zip_root: Path) -> Path:
+    """`SHA256SUMS.txt` beside the release assets (§5.9/P3-3).
+
+    A user (or a mirror) can verify a download without trusting the page that
+    served it. `sha256sum -c` reads this format directly.
+    """
+    entries = []
+    for f in sorted(zip_root.glob("*")):
+        if not f.is_file() or f.name in ("SHA256SUMS.txt",):
+            continue
+        if f.suffix not in (".zip",) and f.name != "update.json":
+            continue
+        entries.append(f"{sha256_file(f)}  {f.name}")
+    target = zip_root / "SHA256SUMS.txt"
+    target.write_text("\n".join(entries) + "\n", encoding="utf-8")
+    say(f"已生成 {target.name}({len(entries)} 项)")
+    return target
+
+
 def make_custom_lyrics_zip(out: Path) -> Path:
     """Standalone zip: `models/whisper-small/…` + `models/translate-ja-zh/…`.
 
@@ -590,6 +657,7 @@ def main() -> int:
     install_packages(py, base)
     bin_dir = fetch_ffmpeg(base, Path(args.ffmpeg_dir) if args.ffmpeg_dir else None)
     write_build_info(base, ffmpeg_version(bin_dir))
+    prune_site_packages(base)
     write_launcher(base)
 
     size = sum(f.stat().st_size for f in base.rglob("*") if f.is_file()) / 1048576
@@ -603,6 +671,7 @@ def main() -> int:
     patch = make_patch_zip(base, zip_root / f"UtaLearnNext-{VERSION}-patch.zip")
     make_update_manifest(base, patch, full, zip_root / "update.json",
                          notes=args.notes)
+    write_checksums(zip_root)
 
     if not args.no_chromium:
         bdir = Path(args.browsers_dir).resolve() if args.browsers_dir else None

@@ -65,6 +65,29 @@ export const api = {
 
   about: () => fetch(`${BASE}/api/about`).then((r) => json<AboutInfo>(r)),
 
+  /* find and import a v1.x install sitting next to this one (§5.5.3) */
+  scanLegacy: () =>
+    fetch(`${BASE}/api/legacy/scan`).then((r) =>
+      json<{
+        candidates: {
+          path: string;
+          label: string;
+          songs: number;
+          song_names: string[];
+          packs: Record<string, number>;
+          version: string;
+        }[];
+      }>(r),
+    ),
+
+  importLegacy: (path: string, move: boolean) =>
+    post<{
+      copied: number;
+      skipped: number;
+      packs: Record<string, string>;
+      settings: string;
+    }>("/api/legacy/import", { path, move }),
+
   diagnosticsUrl: () => `${BASE}/api/diagnostics`,
 
   /* personal word book — global file, so it survives dataset deletion */

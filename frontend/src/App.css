@@ -2890,6 +2890,56 @@ html[data-theme="dark"] .crash h2 {
   color: #f1e4d4;
 }
 .update-actions {
+.legacy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-m);
+  border: 1px solid rgba(178, 146, 116, 0.3);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.legacy-card header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13.5px;
+  color: #33291f;
+}
+
+.legacy-ver {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 138, 61, 0.14);
+  font-size: 10.5px;
+  color: #b7541c;
+}
+
+.legacy-names {
+  font-size: 11px;
+}
+
+.legacy-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.legacy-actions .btn {
+  font-size: 11.5px;
+  padding: 5px 9px;
+}
+
+html[data-theme="dark"] .legacy-card {
+  background: rgba(60, 46, 36, 0.66);
+  border-color: rgba(214, 178, 140, 0.24);
+}
+
+html[data-theme="dark"] .legacy-card header {
+  color: #f1e4d4;
+}
   display: flex;
   gap: 8px;
   align-items: center;

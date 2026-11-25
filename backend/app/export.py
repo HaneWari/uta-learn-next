@@ -401,16 +401,8 @@ def measure_offset(video: Path, duration: float, work: Path,
 
 
 def _probe_duration(video: Path) -> float:
-    """Container duration in seconds, or 0 when ffprobe cannot read it."""
-    try:
-        out = subprocess.run(
-            [binaries.ffprobe(), "-v", "quiet", "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(video)],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        return float(out)
-    except Exception:  # noqa: BLE001
-        return 0.0
+    """Container duration in seconds (via the shared ffmpeg-only probe)."""
+    return binaries.probe_duration(video)
 
 
 def _has_video(path: Path) -> bool:
@@ -422,13 +414,13 @@ def _has_video(path: Path) -> bool:
     """
     try:
         out = subprocess.run(
-            [binaries.ffprobe(), "-v", "quiet", "-select_streams", "v:0",
-             "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(path)],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        return "video" in out
-    except Exception:  # noqa: BLE001
+            [binaries.ffmpeg(), "-hide_banner", "-i", str(path)],
+            capture_output=True, text=True, check=False,
+        ).stderr
+    except (OSError, subprocess.SubprocessError):
         return False
+    # `Stream #0:0 ...: Video:` appears only when a video stream exists
+    return "Video:" in out
 
 
 def _mux(raw: Path, audio: Path | None, out: Path, duration: float,

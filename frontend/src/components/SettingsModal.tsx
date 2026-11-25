@@ -3,7 +3,15 @@ import { api, waitForJob } from "../api";
 import { useSettings } from "../lib/settings";
 import type { AboutInfo, AppSettings } from "../types";
 
-type Group = "general" | "display" | "lyrics" | "network" | "export" | "packs" | "about";
+type Group =
+  | "general"
+  | "display"
+  | "lyrics"
+  | "network"
+  | "export"
+  | "packs"
+  | "data"
+  | "about";
 
 const GROUPS: { id: Group; label: string }[] = [
   { id: "general", label: "常规" },
@@ -12,6 +20,7 @@ const GROUPS: { id: Group; label: string }[] = [
   { id: "network", label: "网络" },
   { id: "export", label: "导出" },
   { id: "packs", label: "扩展包" },
+  { id: "data", label: "数据" },
   { id: "about", label: "关于" },
 ];
 
@@ -90,6 +99,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [about, setAbout] = useState<AboutInfo | null>(null);
   const [proxyNote, setProxyNote] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  /* legacy data import (§5.5.3) */
+  const [legacy, setLegacy] = useState<{
+    scanning: boolean;
+    items: Awaited<ReturnType<typeof api.scanLegacy>>["candidates"];
+    note: string | null;
+  }>({ scanning: false, items: [], note: null });
   /* update state: check · download · restart */
   const [upd, setUpd] = useState<{
     checking: boolean;
@@ -429,6 +444,111 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     {about?.packs.chromium ? "已安装" : "未安装"}
                   </span>
                 </div>
+              </>
+            )}
+
+            {group === "data" && (
+              <>
+                <p className="sethint">
+                  发现同级目录里的旧版本时，可以把歌曲、扩展包和设置一次搬过来。
+                  歌曲会在第一次打开时自动迁移到当前格式（迁移前先备份）。
+                </p>
+                <div className="setrow">
+                  <span className="setlabel">
+                    扫描旧版本
+                    <span className="sethint">
+                      {legacy.scanning
+                        ? "扫描中…"
+                        : legacy.items.length
+                          ? `找到 ${legacy.items.length} 个旧安装`
+                          : "在同级目录里找 v1.x 的数据"}
+                    </span>
+                  </span>
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setLegacy((s) => ({ ...s, scanning: true, note: null }));
+                      void api
+                        .scanLegacy()
+                        .then((r) =>
+                          setLegacy({ scanning: false, items: r.candidates, note: null }),
+                        )
+                        .catch((e: unknown) =>
+                          setLegacy({
+                            scanning: false,
+                            items: [],
+                            note: e instanceof Error ? e.message : String(e),
+                          }),
+                        );
+                    }}
+                    disabled={legacy.scanning}
+                  >
+                    扫描
+                  </button>
+                </div>
+                {legacy.note && <p className="setnote">{legacy.note}</p>}
+                {legacy.items.map((item) => (
+                  <div className="legacy-card" key={item.path}>
+                    <header>
+                      <strong>{item.label}</strong>
+                      {item.version && <span className="legacy-ver">v{item.version}</span>}
+                    </header>
+                    <span className="sethint">
+                      {item.songs} 首歌
+                      {Object.keys(item.packs).length
+                        ? ` · 扩展包 ${Object.keys(item.packs).join(" / ")}`
+                        : ""}
+                    </span>
+                    <span className="sethint legacy-names">
+                      {item.song_names.slice(0, 4).join("、")}
+                      {item.songs > 4 ? " …" : ""}
+                    </span>
+                    <div className="legacy-actions">
+                      <button
+                        className="btn primary"
+                        onClick={() => {
+                          void api
+                            .importLegacy(item.path, false)
+                            .then((r) =>
+                              setLegacy((s) => ({
+                                ...s,
+                                note: `已复制 ${r.copied} 首，跳过 ${r.skipped} 首`,
+                              })),
+                            )
+                            .catch((e: unknown) =>
+                              setLegacy((s) => ({
+                                ...s,
+                                note: e instanceof Error ? e.message : String(e),
+                              })),
+                            );
+                        }}
+                      >
+                        复制导入
+                      </button>
+                      <button
+                        className="btn"
+                        onClick={() => {
+                          void api
+                            .importLegacy(item.path, true)
+                            .then((r) =>
+                              setLegacy((s) => ({
+                                ...s,
+                                note: `已移动 ${r.copied} 首，跳过 ${r.skipped} 首`,
+                              })),
+                            )
+                            .catch((e: unknown) =>
+                              setLegacy((s) => ({
+                                ...s,
+                                note: e instanceof Error ? e.message : String(e),
+                              })),
+                            );
+                        }}
+                      >
+                        移动导入
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </>
             )}
 
