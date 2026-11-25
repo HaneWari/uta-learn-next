@@ -7,15 +7,22 @@ learning app (FastAPI backend + React/Vite frontend, packaged as a no-install po
 
 ## Project at a glance
 
-- **Backend** — `backend/`, Python >= 3.12, FastAPI + uvicorn. Single process serves the
-  API and, once `frontend/dist` exists, the built SPA. Optional extras: `speech`
-  (whisper + fugashi), `export` (playwright), `gpu` (torch), `dev` (ruff).
+- **Backend** — `backend/`, Python >= 3.12, FastAPI + uvicorn. `main.py` only assembles
+  middleware and routers; the routes live in `app/api/` (config, songs, export, packs,
+  settings, update, stage). Optional extras: `speech` (whisper + fugashi),
+  `export` (playwright), `gpu` (torch), `desktop` (pywebview), `dev` (ruff/pytest).
+- **Desktop** — `desktop.py` at the repo root runs the server in-process, picks a free
+  port, waits for the API and opens a pywebview window (system browser if WebView2 is
+  missing). The portable build ships `启动 Uta Learn Next.vbs` plus a console-only `.cmd`.
 - **Frontend** — `frontend/`, React 19 + TypeScript + Vite 7. Strict TS (`strict`,
-  `noUnusedLocals`, `noUnusedParameters`, `erasableSyntaxOnly`).
+  `noUnusedLocals`, `noUnusedParameters`, `erasableSyntaxOnly`). Pure logic lives in
+  `src/lib/` so vitest can cover it without mounting React.
 - **Data** — `localdata/<song>/song_data.json` is the unit of truth for a dataset
-  (segments, word timings, vocab overrides). `localdata/` and `exports/` are gitignored.
-- **Build** — `tools/build_portable.py` assembles the portable zip (embeds Python,
-  ffmpeg, built frontend, optional Chromium under `browsers/`).
+  (segments, word timings, vocab overrides, `meta.view`). Schema v2: every file carries
+  `schema_version` and `revision`; all writes go through `app/repo.py`.
+  `localdata/` and `exports/` are gitignored.
+- **Build** — `tools/build_portable.py` emits the portable zip, a ~1 MB app-layer patch
+  zip and `update.json`. A patch may only contain `backend/` and `frontend/dist/`.
 
 ## How to run
 
@@ -26,11 +33,15 @@ cd backend && python -m uvicorn main:app --reload --port 8000
 # Frontend (vite dev server, proxies API to :8000)
 cd frontend && npm run dev
 
-# Type check & build
-cd frontend && npx tsc --noEmit && npm run build
+# Desktop shell (server in-process + pywebview window)
+python desktop.py --port 8000
+
+# Quality gates — the same set CI runs
+cd backend && python -m ruff check . && python -m pytest
+cd frontend && npx eslint src && npx tsc --noEmit && npm test && npm run build
 ```
 
-`dev.cmd` / `dev.sh` are the one-shot launchers for end users.
+`dev.cmd` / `dev.sh` are the one-shot launchers for source checkouts.
 
 ## Conventions
 
@@ -44,13 +55,18 @@ cd frontend && npx tsc --noEmit && npm run build
 - **Errors** — backend raises `HTTPException` with a Chinese `detail`; frontend shows
   them raw. Don't wrap in extra error envelopes.
 - **State** — the karaoke stage derives everything from `song_data.json` + the
-  `segments` list. Any edit path (card override, lyric override, hidden flag) must
-  round-trip through the `PATCH /api/songs/{name}` route, never a side channel.
+  `segments` list. Any edit path (card override, lyric override, hidden flag,
+  `meta.view`) must round-trip through `PATCH /api/songs/{name}`, never a side channel.
+  Display layers used to be split between localStorage and `meta.trans_hidden`;
+  `meta.view` is now the single copy — don't reintroduce a browser-local one.
 - **Reading marks** — users annotate a custom reading inline as `[汉字](よみ)`
-  (full-width `【】（）` also accepted, romaji readings like `[明日](asu)` work).
+  (full-width `【】()` also accepted, romaji readings like `[明日](asu)` work).
   `dicts.parse_reading_marks` strips the mark-up *before* tokenisation and
   `apply_reading_marks` re-writes the token `kana`/`romaji` after, so the tagger
   never sees the brackets and the per-glyph wipe survives.
+- **Romaji has two readings** — `enrich` stores `kana`/`kana_literal` and
+  `romaji`/`romaji_literal`; particles differ (は → `ha` literal, `wa` sung). The
+  browser picks one per setting (`lib/romaji.ts`). Never bake a single form in.
 
 ## Things that bite
 
@@ -59,8 +75,6 @@ cd frontend && npx tsc --noEmit && npm run build
   debugging locally.
 - **Vocab row layout** — cards are `flex: 0 0 calc((100% - 3*gap)/4)` on purpose
   (fixed 4-up width). Don't add `flex:1`/`wrap` — it regressed to two rows before.
-- **Hidden cards in export** — the headless recorder has no `localStorage`; the
-  `hidecards` flag goes in the export URL query, not the profile.
 - **Right-click zone** — `.vocab` has `overflow-y:auto`, so a `::before` bleed for a
   wider context-menu hit area gets clipped. The wide zone lives in a document-level
   `contextmenu` listener in `VocabCards.tsx`, not CSS.
@@ -68,24 +82,32 @@ cd frontend && npx tsc --noEmit && npm run build
   actually changed; a translation-only edit must not kill the per-glyph wipe.
   When `text` *did* change the PATCH route re-tokenises it (`builder.retime_words`)
   into `lyric_override.words` + `grammar`, so an edited line still shows furigana,
-  romaji and a re-estimated wipe — it is not the verbatim static line it used to be.
-- **whisper is an extension pack** — `fallback._transcribe` prefers a bundled
-  `models/<name>/` dir (loaded straight off disk, works offline). The model is
-  *never* pulled from HuggingFace — a missing pack is a hard, actionable error,
-  and the config page can one-click-install it from the repo's latest release
-  (`POST /api/models/install`, status via `GET /api/models/status`). Build the
-  pack once with `tools/build_portable.py --whisper-pack`; it is version-
-  independent and shipped as `UtaLearnNext-whisper-small.zip` on the release.
-- **fallback alignment is chunked + kana-global** — `build_from_audio` does NOT
-  use the whole-track `_transcribe` + vocal-energy path anymore. It runs
-  `_transcribe_chunked` (30 s windows, keeps only each window's trusted middle),
-  then `_kana_match` does a single Needleman–Wunsch over all lyric kana vs all
-  transcript kana (kanji in either side is read through `analyze`), and
-  `_anchor_rows`/`_line_times` turn the matched kana into per-char times.
-  Lines with no anchors are interpolated; a run of unmatched leading lines is
-  clipped (`found[0] > 2`) as is a trailing run past `song_end` (the last
-  transcript word's end, not the file duration). Keep `align`/`lcs_ratio`/`norm`
-  for `retime.fit`.
+  romaji and a re-estimated wipe. Render and highlight must both read
+  `lib/words.effectiveWords(seg)` — reading `seg.words` on one side and the override
+  on the other desyncs the wipe.
+- **Export port** — `api_export` derives the recorder URL from the incoming request.
+  Never hardcode 8000: the launcher picks the first free port in 8000–8010, and a
+  hardcoded default made every export on :8011 record a dead page.
+- **Export output must have video** — ffmpeg happily writes an audio-only MP4 when the
+  filter chain produced zero frames (happened when the progress-bar calibration read the
+  card row's orange accent in portrait). `_has_video()` guards both muxes; keep that
+  check when touching the calibration path.
+- **whisper is an extension pack** — `fallback._transcribe_chunked` loads a bundled
+  `models/whisper-small/` straight off disk. The model is *never* pulled from
+  HuggingFace — a missing pack is a hard, actionable error, and the config page can
+  one-click-install it (`POST /api/models/install`, `GET /api/models/status`).
+  Build the pack with `tools/build_portable.py --custom-pack`; it is
+  version-independent (`UtaLearnNext-custom-lyrics.zip`, whisper + ja-zh translation).
+- **fallback alignment is chunked + kana-global** — `build_from_audio` runs
+  `_transcribe_chunked` (30 s windows, keeps only each window's trusted middle), then
+  `_kana_match` does a single Needleman–Wunsch over all lyric kana vs all transcript
+  kana (kanji on either side is read through `analyze`), and `_anchor_rows`/`_line_times`
+  turn matched kana into per-char times. Lines with no anchors are interpolated; a
+  leading run of unmatched lines is clipped (`found[0] > 2`) as is a trailing run past
+  `song_end` (the last transcript word's end, not the file duration).
+- **Jobs are per-resource** — `jobs.create(kind, resource)` then `jobs.run(jid, fn)`.
+  `cpu` / `export` run one at a time, `net` two. Long loops must call `progress()`:
+  that is where cancellation is checked.
 - **`.git` is read-only in the sandbox** — commits and pushes require escalation.
 
 ## Git
@@ -101,14 +123,19 @@ cd frontend && npx tsc --noEmit && npm run build
 
 - `npx tsc --noEmit` must pass before touching anything else in the frontend.
 - `ruff check backend/` for backend style (line length 100, py312).
-- `tools/check_retime.py` and `tools/check_export_sync.py` are the regression
-  harnesses for the audio-lyric timing logic — run them when touching
-  `builder.py`/`retime.py`/`export.py`.
+- `python -m pytest` in `backend/` — 221 tests, fully offline (lyric sources are faked).
+  `npm test` in `frontend/` — vitest, 47 cases.
+- `tools/check_export_sync.py` is the regression harness for audio-video timing — run
+  it when touching `export.py`.
+- `python tools/smoke_portable.py <folder>` boots a built portable and checks
+  `/api/version`, `/api/songs` and the SPA; `--ci` builds without zip/chromium for it.
 - Playwright E2E lives in ad-hoc scripts, not a suite; write one to `*.py` when
   verifying a UI change end-to-end and delete it after.
 
 ## Don't touch
 
-- `localdata/`, `exports/` — user data, gitignored for a reason.
+- `localdata/`, `exports/`, `_update/`, `app.prev/` — user data and update state.
 - `backend/app/data/` dictionaries unless regenerating them on purpose.
+- `backend/app/version.py` is the single source of the version number; the API and the
+  build script both read it. Don't hardcode a version anywhere else.
 - Release tags and published assets on GitHub.

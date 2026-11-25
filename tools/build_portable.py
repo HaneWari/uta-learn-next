@@ -565,7 +565,8 @@ def main() -> int:
 
     copy_tree(ROOT / "backend", base / "backend", ignore=(".venv", "utalearn_backend.egg-info"))
     copy_tree(ROOT / "frontend" / "dist", base / "frontend" / "dist")
-    for name in ("README.md", "LICENSE"):
+    for name in ("README.md", "LICENSE", "CHANGELOG.md", "PRIVACY.md",
+                 "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(ROOT / name, base / name)
     # the desktop shell lives at the app root: it owns the port choice, the
     # readiness wait and the pywebview window
