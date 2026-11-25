@@ -216,6 +216,8 @@ export const api = {
         kind?: "patch" | "full";
         runtime_changed?: boolean;
         notes?: string;
+        /** set when the latest release predates the updater (no manifest) */
+        note?: string;
         error?: string;
       }>(r),
     ),

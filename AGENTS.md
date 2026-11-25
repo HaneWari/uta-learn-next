@@ -22,7 +22,9 @@ learning app (FastAPI backend + React/Vite frontend, packaged as a no-install po
   `schema_version` and `revision`; all writes go through `app/repo.py`.
   `localdata/` and `exports/` are gitignored.
 - **Build** — `tools/build_portable.py` emits the portable zip, a ~1 MB app-layer patch
-  zip and `update.json`. A patch may only contain `backend/` and `frontend/dist/`.
+  zip, `update.json` and `SHA256SUMS.txt`. A patch may only contain `backend/` and
+  `frontend/dist/`. The build prunes pip/setuptools/onnxruntime and ships **only**
+  `ffmpeg.exe` — duration comes from `binaries.probe_duration`, so there is no ffprobe.
 
 ## How to run
 
@@ -108,6 +110,17 @@ cd frontend && npx eslint src && npx tsc --noEmit && npm test && npm run build
 - **Jobs are per-resource** — `jobs.create(kind, resource)` then `jobs.run(jid, fn)`.
   `cpu` / `export` run one at a time, `net` two. Long loops must call `progress()`:
   that is where cancellation is checked.
+- **Export is frame-by-frame** — `render=1` installs `window.__utaSeek.seek(t)` and
+  `__utaReady`; `app/render_frames.py` screenshots each 60 fps frame through CDP and
+  pipes it into one x264 pass. The old recorder survives only behind
+  `settings.export_compat`. Never reintroduce a wall-clock/realtime path as the default.
+- **Cards: one rule** — `app/vocab_rules.content_flag` decides whether a token earns a
+  card, for both build pipelines. Don't call `dicts.is_content` directly in a pipeline.
+- **View state** — `store/viewStore.ts` (zustand) holds the session's layer overrides;
+  `meta.view` is the persisted truth. Both must agree, and the export reads the URL
+  flags derived from them.
+- **Generated types** — `frontend/src/api-types.ts` comes from
+  `python tools/gen_api_types.py`; CI runs it with `--check`.
 - **`.git` is read-only in the sandbox** — commits and pushes require escalation.
 
 ## Git
@@ -123,8 +136,8 @@ cd frontend && npx eslint src && npx tsc --noEmit && npm test && npm run build
 
 - `npx tsc --noEmit` must pass before touching anything else in the frontend.
 - `ruff check backend/` for backend style (line length 100, py312).
-- `python -m pytest` in `backend/` — 221 tests, fully offline (lyric sources are faked).
-  `npm test` in `frontend/` — vitest, 47 cases.
+- `python -m pytest` in `backend/` — 293 tests, fully offline (lyric sources are faked).
+  `npm test` in `frontend/` — vitest, 84 cases.
 - `tools/check_export_sync.py` is the regression harness for audio-video timing — run
   it when touching `export.py`.
 - `python tools/smoke_portable.py <folder>` boots a built portable and checks

@@ -55,10 +55,13 @@ def probe_duration(path, timeout: float = 20.0) -> float:
     import subprocess
 
     try:
+        # `text=True` normally yields str, but a redirect/encoding mishap can
+        # leave it None — the regex below must not be handed a non-string
         out = subprocess.run(
             [ffmpeg(), "-hide_banner", "-i", str(path)],
-            capture_output=True, text=True, timeout=timeout, check=False,
-        ).stderr
+            capture_output=True, text=True, errors="replace",
+            timeout=timeout, check=False,
+        ).stderr or ""
     except (OSError, subprocess.SubprocessError):
         return 0.0
     m = re.search(r"Duration:\s*(\d+):(\d{2}):(\d{2}(?:\.\d+)?)", out)

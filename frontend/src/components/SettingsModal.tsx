@@ -113,6 +113,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     kind?: "patch" | "full";
     runtimeChanged?: boolean;
     notes?: string;
+    note?: string;
     error?: string;
     applying: boolean;
     pct: number;
@@ -162,6 +163,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         kind: r.kind,
         runtimeChanged: r.runtime_changed,
         notes: r.notes,
+        note: r.note,
         error: r.error,
         applying: false,
         pct: 0,
@@ -597,8 +599,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                             ? upd.kind === "patch"
                               ? `新版本 ${upd.latest}（补丁，约 1MB）`
                               : `新版本 ${upd.latest}（运行时变化，需完整包）`
-                            : upd.error
-                              ? `检查失败：${upd.error}`
+                            : upd.note
+                              ? upd.note
+                              : upd.error
+                                ? `检查失败:${upd.error}`
                               : upd.latest
                                 ? "已是最新版本"
                                 : "启动时会静默检查一次"}

@@ -21,6 +21,9 @@ def api_update_check(force: bool = False):
         return {"enabled": False, "available": False, "current": updater.APP_VERSION}
     try:
         manifest = updater.fetch_manifest()
+    except updater.NoManifest as e:
+        return {"enabled": True, "available": False,
+                "current": updater.APP_VERSION, "note": str(e)}
     except Exception as e:  # noqa: BLE001
         return {"enabled": True, "available": False,
                 "current": updater.APP_VERSION, "error": str(e)}

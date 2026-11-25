@@ -39,6 +39,10 @@ def _state_file() -> Path:
     return STAGING / "state.json"
 
 
+class NoManifest(RuntimeError):
+    """The latest release predates the updater, so it has no `update.json`."""
+
+
 def local_runtime_id() -> str:
     """The `runtime_id` this build was made with (from BUILD_INFO.json)."""
     try:
@@ -61,11 +65,20 @@ def is_newer(candidate: str, current: str = APP_VERSION) -> bool:
 
 
 def fetch_manifest(timeout: float = 10.0) -> dict:
-    """The newest release's `update.json` (the only file this reads)."""
+    """The newest release's `update.json` (the only file this reads).
+
+    A release published before the updater existed has no manifest. That is
+    the normal state of the world until the first v2 release ships, so it is
+    reported as "no update information" rather than an HTTP error the UI would
+    show verbatim.
+    """
     url = f"https://github.com/{REPO}/releases/latest/download/{MANIFEST_ASSET}"
     with httpx.Client(proxy=resolve_proxy(), timeout=timeout,
                       follow_redirects=True) as client:
         r = client.get(url)
+        if r.status_code == 404:
+            raise NoManifest(
+                "当前发行版没有更新清单(这个版本早于自动更新)")
         r.raise_for_status()
         return r.json()
 
