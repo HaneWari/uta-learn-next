@@ -151,3 +151,70 @@ class TestProxyLifetime:
     def test_the_same_proxy_reuses_the_pool(self):
         src = sources.LrclibSource()
         assert src.client is src.client
+
+
+class TestQQSearch:
+    """QQ's mobile search CGI started returning 2001 for nearly every request.
+
+    The legacy CGI answers the same query, so search must try it first and only
+    fall back to the mobile call. These tests pin that order: a regression that
+    flips it makes every QQ search fail in production while unit tests still
+    pass, which is exactly how this shipped broken.
+    """
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        def __init__(self, legacy):
+            self.legacy = legacy
+            self.calls = []
+
+        def close(self):
+            return None
+
+        def get(self, url, params=None, headers=None):
+            self.calls.append(("get", url, params))
+            return self.legacy
+
+        def post(self, url, content=None):
+            self.calls.append(("post", url, None))
+            raise RuntimeError("mobile CGI must not be reached")
+
+    def _legacy_payload(self, rows):
+        return {"code": 0, "data": {"song": {"list": rows}}}
+
+    @pytest.fixture(autouse=True)
+    def no_proxy(self, monkeypatch):
+        """Keep the source from rebuilding its client against the real network."""
+        monkeypatch.setattr(sources, "resolve_proxy", lambda: None)
+
+    def test_search_uses_the_legacy_cgi_first(self):
+        src = sources.QQSource()
+        client = self.FakeClient(self.FakeResponse(self._legacy_payload([
+            {"songmid": "003WFMXk4O5ywc", "songid": 247294300, "songname": "夜に駆ける",
+             "interval": 261, "albumname": "THE BOOK",
+             "singer": [{"name": "YOASOBI"}]},
+        ])))
+        src._client = client
+        src._client_proxy = None
+        found = src.search("夜に駆ける")
+        assert client.calls[0][0] == "get"
+        assert client.calls[0][1] == sources.QQ_SEARCH_URL
+        assert found[0].id == "247294300"
+        assert found[0].extra["mid"] == "003WFMXk4O5ywc"
+        assert found[0].duration == 261
+
+    def test_an_empty_legacy_result_is_an_error_for_the_caller(self):
+        src = sources.QQSource()
+        src._client = self.FakeClient(self.FakeResponse(self._legacy_payload([])))
+        src._client_proxy = None
+        with pytest.raises(RuntimeError):
+            src._search_legacy("nothing")

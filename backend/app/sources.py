@@ -113,6 +113,15 @@ QQ_COMM = {
     "tmeAppID": "qqmusiclight", "nettype": "NETWORK_WIFI", "udid": "0",
 }
 
+# QQ's mobile search CGI (`SearchCgiService.DoSearchForQQMusicLite`) started
+# answering `code: 2001` to most requests in late 2026 — intermittently at
+# first, then consistently for a while per IP, and refreshing the session does
+# not clear it. The legacy desktop endpoint answers the same query normally, and
+# the lyric endpoint (`PlayLyricInfo`) was never affected, so search goes
+# through the legacy CGI and keeps the mobile one as a fallback.
+QQ_SEARCH_URL = "https://c.y.qq.com/soso/fcgi-bin/client_search_cp"
+QQ_SEARCH_HEADERS = {"user-agent": "Mozilla/5.0", "referer": "https://y.qq.com/"}
+
 
 class QQSource:
     name = "qq"
@@ -165,6 +174,47 @@ class QQSource:
         return payload["request"]["data"]
 
     def search(self, query: str) -> list[Song]:
+        """Search QQ Music, legacy endpoint first.
+
+        The legacy CGI returns `songmid` and `songid` together with the same
+        metadata the mobile CGI did, so callers cannot tell which one answered.
+        It is tried first because it is currently the only one that works; the
+        mobile call stays as a fallback in case QQ retires the legacy path.
+        """
+        try:
+            return self._search_legacy(query)
+        except Exception:  # noqa: BLE001
+            return self._search_mobile(query)
+
+    def _search_legacy(self, query: str) -> list[Song]:
+        resp = self.client.get(
+            QQ_SEARCH_URL,
+            params={"w": query, "format": "json", "n": 20, "p": 1},
+            headers=QQ_SEARCH_HEADERS,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        if payload.get("code") != 0:
+            raise RuntimeError("QQ 音乐搜索接口返回错误")
+        rows = payload.get("data", {}).get("song", {}).get("list") or []
+        out = []
+        for s in rows:
+            mid = s.get("songmid") or ""
+            out.append(Song(
+                source=self.name, id=str(s.get("songid") or ""),
+                title=s.get("songname", ""),
+                artist="/".join(x.get("name", "") for x in s.get("singer") or []
+                                if x.get("name")),
+                album=(s.get("albumname") or ""),
+                duration=float(s.get("interval") or 0),
+                kind="char",
+                extra={"mid": mid},
+            ))
+        if not out:
+            raise RuntimeError("QQ 音乐没有搜到结果")
+        return out
+
+    def _search_mobile(self, query: str) -> list[Song]:
         comm = self._session()
         param = {
             "search_id": str(random.randint(1, 20) * 18014398509481984

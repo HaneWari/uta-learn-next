@@ -35,13 +35,6 @@ learning app (FastAPI backend + React/Vite frontend, packaged as a no-install po
   **only** `ffmpeg.exe` (duration comes from `binaries.probe_duration`, no ffprobe),
   re-quantises the whisper pack to int8 (~461 → 237 MB) and drops Playwright's
   `chrome-headless-shell` from the Chromium pack (~333 → 209 MB).
-- **Signing** — `UtaLearn Next.exe` is compiled by `tools/build_launcher_exe`
-  and signed automatically when `UTALEARN_SIGN_CERT` points at a `.pfx`
-  (`UTALEARN_SIGN_PASS` for the password, optional `UTALEARN_SIGN_TS` for the
-  timestamp URL). Without the env var the build says so and ships unsigned —
-  a checkout build must never require a certificate. Only the exe is signed;
-  the zip cannot carry a signature, so a SmartScreen prompt on first download
-  still depends on the exe's own reputation.
 
 ## How to run
 

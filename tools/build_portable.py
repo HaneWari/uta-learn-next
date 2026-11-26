@@ -356,60 +356,8 @@ def build_launcher_exe(out: Path) -> Path:
         assembly.unlink(missing_ok=True)
     if result.returncode != 0 or not out.exists():
         raise SystemExit(f"编译启动器失败:\n{result.stdout}\n{result.stderr}")
-    sign_file(out)
     say(f"已生成 {out.name}({out.stat().st_size / 1024:.0f} KB)")
     return out
-
-
-def sign_file(path: Path) -> None:
-    """Authenticode-sign `path` when signing is configured; otherwise no-op.
-
-    Signing is a release-machine concern, not a source concern: a build from a
-    checkout must still work without a certificate. The stamp comes from
-    `UTALEARN_SIGN_CERT` (path to a .pfx), and the password from
-    `UTALEARN_SIGN_PASS`. When the cert is absent the build says so once and
-    ships an unsigned exe — the same result as today, minus a silent surprise.
-    """
-    cert = os.environ.get("UTALEARN_SIGN_CERT")
-    if not cert:
-        say("未配置签名证书,跳过签名(设置 UTALEARN_SIGN_CERT 后会签)")
-        return
-    if not Path(cert).exists():
-        raise SystemExit(f"UTALEARN_SIGN_CERT 指向的证书不存在:{cert}")
-    signtool = _signtool()
-    if signtool is None:
-        raise SystemExit(
-            "找不到 signtool.exe(Windows SDK 自带)。装好 SDK 后重试,"
-            "或临时清空 UTALEARN_SIGN_CERT 出未签名包。")
-    cmd = [
-        str(signtool), "sign", "/fd", "SHA256", "/td", "SHA256",
-        "/tr", os.environ.get("UTALEARN_SIGN_TS", "http://timestamp.digicert.com"),
-        "/f", cert,
-    ]
-    password = os.environ.get("UTALEARN_SIGN_PASS")
-    if password:
-        cmd += ["/p", password]
-    cmd.append(str(path))
-    result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-    if result.returncode != 0:
-        raise SystemExit(
-            "签名失败:\n"
-            f"{result.stdout}\n{result.stderr}\n"
-            "常见原因:证书密码错误、证书已过期、时间戳服务器不可达。")
-    say(f"已签名 {path.name}")
-
-
-def _signtool() -> Path | None:
-    found = shutil.which("signtool")
-    if found:
-        return Path(found)
-    for kit in (r"C:\Program Files (x86)\Windows Kits\10\bin",
-                r"C:\Program Files (x86)\Windows Kits\8.1\bin"):
-        root = Path(kit)
-        if root.is_dir():
-            for candidate in root.rglob("signtool.exe"):
-                return candidate
-    return None
 
 
 def write_launcher(base: Path) -> None:
