@@ -59,6 +59,17 @@ def prepare_env() -> None:
     browsers = APP_ROOT / "browsers"
     if browsers.is_dir():
         os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browsers))
+    # Windows groups taskbar buttons by AppUserModelID. Without an explicit one
+    # the window inherits `pythonw.exe`'s identity, so the taskbar button keeps
+    # Python's icon even though the form itself has ours.
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "HaneWari.UtaLearnNext")
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def free_port(start: int = 8000, end: int = 8010) -> int:
@@ -151,28 +162,83 @@ def _active_jobs(base: str) -> int:
         return 0
 
 
-def confirm_close(base: str) -> bool:
-    """True when it is safe to close. No jobs → never nag."""
-    count = _active_jobs(base)
-    if count <= 0:
-        return True
+def _ask_yes_no(title: str, text: str) -> bool:
+    """Blocking yes/no box without tkinter.
+
+    The portable Python has no `tkinter` (it would add ~10 MB for one dialog),
+    so the old implementation fell through to "refuse to close" on every
+    packaged build — which is why 关闭窗口时确认 looked broken. Win32's
+    `MessageBoxW` already exists in every Windows install and pumps its own
+    message loop, so it is safe to call from the pywebview closing handler.
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            MB_YESNO = 0x04
+            MB_ICONWARNING = 0x30
+            MB_SETFOREGROUND = 0x10000
+            answer = ctypes.windll.user32.MessageBoxW(
+                None, text, title,
+                MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND)
+            return answer == 6  # IDYES
+        except Exception:  # noqa: BLE001
+            pass
     try:
         import tkinter
         from tkinter import messagebox
 
         root = tkinter.Tk()
         root.withdraw()
-        answer = messagebox.askyesno(
-            "Uta Learn Next",
-            f"还有 {count} 个任务正在进行（生成、导出或下载）。\n"
-            "退出会中断它们，确定退出吗？",
-        )
+        answer = messagebox.askyesno(title, text)
         root.destroy()
         return bool(answer)
     except Exception:  # noqa: BLE001
-        # no tkinter (or no display): fail safe by refusing to kill work
-        print(f"[uta] 还有 {count} 个任务在进行,请等待完成后再关闭")
         return False
+
+
+def _setting(name: str, default):
+    """Read one saved setting without booting the server.
+
+    `desktop.py` runs around the FastAPI app, and the closing handler has to
+    answer instantly; reading the same `settings.json` the app writes is
+    cheaper than an HTTP round trip and works even if the server is wedged.
+    """
+    env = os.environ.get("DATA_DIR")
+    if env:
+        root = Path(env)
+    else:
+        # mirror app.paths: the folder next to the app when writable, else the
+        # per-user directory (Program Files installs)
+        root = APP_ROOT / "localdata"
+        try:
+            root.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+            root = Path(base) / "UtaLearnNext" / "localdata"
+    try:
+        data = json.loads((root / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+    return data.get(name, default) if isinstance(data, dict) else default
+
+
+def confirm_close(base: str) -> bool:
+    """True when it is safe to close.
+
+    The 设置 switch decides *whether* to ask at all — with it on, closing asks
+    once (that is what the user turned on); with it off, the window closes at
+    once. Running jobs add a line to the prompt instead of being the only
+    reason to ask, which is what made the feature look dead on an idle app.
+    """
+    if not _setting("confirm_close", True):
+        return True
+    count = _active_jobs(base)
+    text = "确定要退出 Uta Learn Next 吗?"
+    if count > 0:
+        text = (f"还有 {count} 个任务正在进行(生成、导出或下载)。\n"
+                "退出会中断它们,确定退出吗?")
+    return _ask_yes_no("Uta Learn Next", text)
 
 
 class SingleInstance:
@@ -252,10 +318,17 @@ def _install_tray(window, url: str) -> None:
         return
 
     def icon_image():
+        # the tray must wear the same mark as the window/exe; drawing a 唄 with
+        # Pillow's default bitmap font produced a broken glyph on many systems
+        path = _window_icon()
+        if path:
+            try:
+                return Image.open(path).convert("RGBA")
+            except OSError:
+                pass
         img = Image.new("RGB", (64, 64), "#f7efe1")
         draw = ImageDraw.Draw(img)
         draw.ellipse((8, 8, 56, 56), outline="#ff8a3d", width=4)
-        draw.text((24, 20), "唄", fill="#b7541a")
         return img
 
     def show(_icon, _item=None):
@@ -270,7 +343,13 @@ def _install_tray(window, url: str) -> None:
 
         try:
             if os.name == "nt":
-                subprocess.Popen(["explorer", str(APP_ROOT)])
+                # CREATE_NO_WINDOW: without it a `pythonw` parent still flashes
+                # a console before Explorer takes over (§ the terminal-flash
+                # report; the backend learned the same lesson).
+                subprocess.Popen(
+                    ["explorer", str(APP_ROOT)],
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
         except Exception:  # noqa: BLE001
             pass
 
@@ -291,6 +370,21 @@ def _install_tray(window, url: str) -> None:
     threading.Thread(target=tray.run, daemon=True, name="uta-tray").start()
 
 
+def _window_icon() -> str | None:
+    """Path to the `.ico` the window/taskbar should show.
+
+    pywebview's WinForms backend accepts an `.ico` path; the portable build
+    ships one next to `desktop.py` (`app.ico`), a source checkout has it under
+    `tools/assets/`. Returning None keeps pywebview's fallback instead of
+    failing the whole window over a missing icon.
+    """
+    for candidate in (APP_ROOT / "app.ico",
+                      APP_ROOT / "tools" / "assets" / "app.ico"):
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 def run_window(url: str) -> bool:
     """pywebview window; False when the backend is unavailable."""
     try:
@@ -299,6 +393,7 @@ def run_window(url: str) -> bool:
         return False
 
     state = _load_window_state()
+    icon = _window_icon()
     try:
         window = webview.create_window(
             "Uta Learn Next",
@@ -321,7 +416,10 @@ def run_window(url: str) -> bool:
             pass
         # the tray menu and the settings page both need a "show me again" hook
         _install_tray(window, url)
-        webview.start(debug=False)
+        # `icon` is what WinForms puts on the *window*; without it the caption
+        # and taskbar show Edge's icon (or, worse, the Python one). The exe's
+        # embedded resource only covers Explorer, not the webview host.
+        webview.start(debug=False, icon=icon)
         _save_window_state(window)
         return True
     except Exception as e:  # noqa: BLE001

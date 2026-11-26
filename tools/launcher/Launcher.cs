@@ -51,10 +51,14 @@ namespace UtaLearnNext
                 FileName = python,
                 Arguments = Quote(desktop),
                 WorkingDirectory = root,
-                // pythonw has no console, so `UseShellExecute = false` would
-                // hand it a null stdout and uvicorn's formatter dies. Let the
-                // shell create the process; desktop.py also installs a sink.
-                UseShellExecute = true,
+                // Launch without the shell and with CreateNoWindow: some Windows
+                // builds flashed a console rectangle when a GUI-subsystem child
+                // was started through the shell. pythonw has no console of its
+                // own, and desktop.py installs a StringIO sink for the null
+                // stdout/stderr, so uvicorn's formatter is safe either way.
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
             };
             foreach (string a in args)
             {

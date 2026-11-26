@@ -764,12 +764,18 @@ def main() -> int:
     copy_tree(ROOT / "backend", base / "backend",
               ignore=("utalearn_backend.egg-info", ".pytest_cache", ".ruff_cache"))
     copy_tree(ROOT / "frontend" / "dist", base / "frontend" / "dist")
-    for name in ("README.md", "LICENSE", "CHANGELOG.md", "PRIVACY.md",
-                 "THIRD_PARTY_NOTICES.md"):
+    # CHANGELOG stays in the repo: a user running the app has no use for a
+    # version-by-version history, and the release notes already say what
+    # changed for this download.
+    for name in ("README.md", "LICENSE", "PRIVACY.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(ROOT / name, base / name)
     # the desktop shell lives at the app root: it owns the port choice, the
     # readiness wait and the pywebview window
     shutil.copy2(ROOT / "desktop.py", base / "desktop.py")
+    # The window/taskbar icon is read from the app root at runtime; the exe
+    # embeds the same file as a resource, but the pywebview host needs the
+    # `.ico` on disk to replace Edge/Python's default window icon.
+    shutil.copy2(ROOT / "tools" / "assets" / "app.ico", base / "app.ico")
     say("已复制代码与前端产物")
 
     py = build_python(base)
