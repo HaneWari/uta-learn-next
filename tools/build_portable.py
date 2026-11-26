@@ -53,8 +53,15 @@ def _app_version() -> str:
     return m.group(1)
 
 
+def _app_name() -> str:
+    src = (ROOT / "backend" / "app" / "version.py").read_text(encoding="utf-8")
+    m = re.search(r'APP_NAME\s*=\s*"([^"]+)"', src)
+    return m.group(1) if m else "Uta Learn Next"
+
+
 MANIFEST = json.loads((ROOT / "tools" / "build_manifest.json").read_text(encoding="utf-8"))
 VERSION = _app_version()
+APP_NAME = _app_name()
 
 PY_VERSION = MANIFEST["python"]["version"]
 PY_ZIP = MANIFEST["python"]["url"]
@@ -284,29 +291,86 @@ CONSOLE_LAUNCHER_LINES = [
     "pause",
 ]
 
-VBS_LINES = [
-    "' 双击这个文件启动 Uta Learn Next,不出现控制台窗口。",
-    "' 出问题需要看日志时,改用「启动 Uta Learn Next (控制台).cmd」。",
-    'Set fso = CreateObject("Scripting.FileSystemObject")',
-    "root = fso.GetParentFolderName(WScript.ScriptFullName)",
-    'Set shell = CreateObject("WScript.Shell")',
-    "shell.CurrentDirectory = root",
-    'shell.Run Chr(34) & root & "\\python\\pythonw.exe" & Chr(34) & " " & Chr(34) & root & "\\desktop.py" & Chr(34), 0, False',
-]
+LAUNCHER_EXE = "UtaLearn Next.exe"
+
+# The C# compiler that ships with the .NET Framework — present on a stock
+# Windows 10/11 and used by the Windows CI image, so no SDK install is needed.
+_CSC_CANDIDATES = (
+    r"Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+    r"Microsoft.NET\Framework\v4.0.30319\csc.exe",
+)
+
+
+def _csc() -> Path:
+    windir = Path(os.environ.get("WINDIR", r"C:\Windows"))
+    for rel in _CSC_CANDIDATES:
+        candidate = windir / rel
+        if candidate.exists():
+            return candidate
+    raise SystemExit(
+        "找不到 csc.exe(.NET Framework 自带的 C# 编译器),无法生成启动器。\n"
+        "Windows 10/11 自带;精简系统请安装 .NET Framework 4.x 运行时。")
+
+
+def build_launcher_exe(out: Path) -> Path:
+    """Compile `tools/launcher/Launcher.cs` into the shipped `UtaLearn Next.exe`.
+
+    A signed exe is the only launcher Windows can show as a verified publisher;
+    `.vbs`/`.cmd` cannot carry an Authenticode signature at all, which is why
+    this replaced them rather than sitting next to them.
+
+    The version resource is written from `app.version.APP_VERSION` (via a
+    generated `AssemblyInfo.cs`) rather than hardcoded in the .cs, because
+    `version.py` is the single source of truth for the version number.
+    """
+    icon = ROOT / "tools" / "assets" / "app.ico"
+    if not icon.exists():
+        raise SystemExit(f"缺图标 {icon},先运行 python tools/make_icon.py")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.unlink(missing_ok=True)
+    # a four-part version is required by the assembly attributes; APP_VERSION
+    # is 2.0.0, so pad it rather than inventing a separate number
+    parts = (VERSION.split(".") + ["0", "0", "0"])[:4]
+    four = ".".join(parts)
+    assembly = out.parent / "_AssemblyInfo.g.cs"
+    assembly.write_text(
+        "using System.Reflection;\n"
+        f'[assembly: AssemblyTitle("{APP_NAME}")]\n'
+        '[assembly: AssemblyDescription("跟着日语歌学日语 — 逐字高亮、假名注音、词汇卡")]\n'
+        f'[assembly: AssemblyProduct("{APP_NAME}")]\n'
+        '[assembly: AssemblyCompany("HaneWari")]\n'
+        f'[assembly: AssemblyCopyright("Copyright © {datetime.now(UTC).year} HaneWari")]\n'
+        f'[assembly: AssemblyVersion("{four}")]\n'
+        f'[assembly: AssemblyFileVersion("{four}")]\n'
+        f'[assembly: AssemblyInformationalVersion("{VERSION}")]\n',
+        encoding="utf-8")
+    cmd = [
+        str(_csc()), "/nologo", "/target:winexe", "/platform:anycpu", "/optimize+",
+        f"/out:{out}", f"/win32icon:{icon}",
+        str(ROOT / "tools" / "launcher" / "Launcher.cs"),
+        str(assembly),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    finally:
+        assembly.unlink(missing_ok=True)
+    if result.returncode != 0 or not out.exists():
+        raise SystemExit(f"编译启动器失败:\n{result.stdout}\n{result.stderr}")
+    say(f"已生成 {out.name}({out.stat().st_size / 1024:.0f} KB)")
+    return out
 
 
 def write_launcher(base: Path) -> None:
-    # A previous build left `启动 Uta Learn Next.cmd` here and this build does
-    # not delete it. It has to go explicitly: the .vbs is now the single
-    # double-click entry and a stale .cmd beside it only confuses users.
-    stale = base / "启动 Uta Learn Next.cmd"
-    stale.unlink(missing_ok=True)
+    # A reused build folder still holds whatever the previous build wrote here.
+    # None of it may survive: the exe is the single double-click entry, and a
+    # stale .cmd/.vbs beside it only confuses users (and ships dead weight).
+    for stale in ("启动 Uta Learn Next.cmd", "启动 Uta Learn Next.vbs"):
+        (base / stale).unlink(missing_ok=True)
+    build_launcher_exe(base / LAUNCHER_EXE)
     console = base / "启动 Uta Learn Next (控制台).cmd"
     console.write_bytes(("\r\n".join(CONSOLE_LAUNCHER_LINES) + "\r\n").encode("utf-8"))
-    vbs = base / "启动 Uta Learn Next.vbs"
-    vbs.write_bytes(("\r\n".join(VBS_LINES) + "\r\n").encode("utf-8"))
     shutil.copy2(ROOT / "desktop.py", base / "desktop.py")
-    say(f"已生成 desktop.py 与 {console.name} / {vbs.name}")
+    say(f"已生成 desktop.py、{LAUNCHER_EXE} 与 {console.name}")
 
 
 # Packages that only exist to *build* an environment, or that nothing on the
@@ -440,7 +504,7 @@ def make_addon_zip(folder: Path, out: Path) -> Path:
     """Zip a single extension folder as `<folder>/...` — no UtaLearnNext wrapper.
 
     Extension packs drop straight into the app folder (`browsers/` or
-    `models/` next to `启动 Uta Learn Next.vbs`), so the archive carries the
+    `models/` next to `UtaLearn Next.exe`), so the archive carries the
     folder itself, not a wrapper the unpacker would have to peel off.
     """
     out.parent.mkdir(parents=True, exist_ok=True)
