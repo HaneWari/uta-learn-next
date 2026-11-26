@@ -19,6 +19,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   long_vowel: "ou",
   theme: "system",
   reduce_motion: false,
+  ui_font: "m",
+  page_zoom: 1,
   default_layers: {
     furigana: true,
     romaji: true,
@@ -26,7 +28,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
     next_line: true,
     cards: true,
   },
-  search_sort: "duration",
   jlpt_max: 0,
   proxy_mode: "auto",
   proxy_url: "",

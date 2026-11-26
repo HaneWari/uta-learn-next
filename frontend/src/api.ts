@@ -3,6 +3,7 @@ import type {
   AppSettings,
   ExportEnv,
   Job,
+  PackStatus,
   SearchHit,
   SongSummary,
   StageBackground,
@@ -243,6 +244,16 @@ export const api = {
       method: "POST",
       headers: writeHeaders(),
     }).then((r) => json<{ job_id: string | null; installed?: boolean }>(r)),
+
+  /// 两个扩展包的真实安装状态与体积 (设置 → 扩展包)
+  packStatus: () =>
+    fetch(`${BASE}/api/packs/status`).then((r) => json<{ packs: PackStatus[] }>(r)),
+
+  removePack: (key: "custom_lyrics" | "chromium") =>
+    fetch(`${BASE}/api/packs/${key}`, {
+      method: "DELETE",
+      headers: writeHeaders(),
+    }).then((r) => json<PackStatus>(r)),
 
   songs: () => fetch(`${BASE}/api/songs`).then((r) => json<SongSummary[]>(r)),
 

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, waitForJob } from "../api";
 import { useSettings } from "../lib/settings";
-import type { AboutInfo, AppSettings } from "../types";
+import type { AboutInfo, AppSettings, PackStatus } from "../types";
 
 type Group =
   | "general"
@@ -24,7 +24,31 @@ const GROUPS: { id: Group; label: string }[] = [
   { id: "about", label: "关于" },
 ];
 
-/** A labelled switch: the click target is the whole row, not a 12px knob. */
+/** "1.2 GB" / "237 MB" — the settings page never shows raw bytes. */
+function humanSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return "—";
+  const mb = bytes / 1048576;
+  if (mb >= 1024) return `${(mb / 1024).toFixed(2)} GB`;
+  return `${Math.round(mb)} MB`;
+}
+
+const PACK_META = {
+  custom_lyrics: {
+    title: "自定义歌词扩展包",
+    hint: "whisper 语音识别 + 日中翻译模型;自定义歌词与中文翻译都需要它",
+  },
+  chromium: {
+    title: "Chromium 扩展包",
+    hint: "系统浏览器无法用于导出时使用;装好后导出不再依赖已安装的 Chrome",
+  },
+} as const;
+
+/** A labelled switch. Only the switch itself changes the value.
+
+ * Clicking the row (or its label text) must do nothing: the settings page is
+ * a list of rows, and a stray click while scrolling used to flip a switch the
+ * user never aimed at.
+ */
 function Toggle({
   label,
   hint,
@@ -37,7 +61,7 @@ function Toggle({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label className="setrow">
+    <div className="setrow">
       <span className="setlabel">
         {label}
         {hint && <span className="sethint">{hint}</span>}
@@ -52,7 +76,7 @@ function Toggle({
       >
         <span className="switch-knob" />
       </button>
-    </label>
+    </div>
   );
 }
 
@@ -97,6 +121,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [settings, update] = useSettings();
   const [group, setGroup] = useState<Group>("general");
   const [about, setAbout] = useState<AboutInfo | null>(null);
+  /* 扩展包:真实体积 + 安装/删除动作 */
+  const [packs, setPacks] = useState<PackStatus[]>([]);
+  const [packBusy, setPackBusy] = useState<string | null>(null);
+  const [packNote, setPackNote] = useState<string | null>(null);
   const [proxyNote, setProxyNote] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   /* legacy data import (§5.5.3) */
@@ -125,6 +153,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     api.about().then(setAbout).catch(() => setAbout(null));
   }, [group]);
 
+  const refreshPacks = useCallback(() => {
+    api
+      .packStatus()
+      .then((r) => setPacks(r.packs))
+      .catch(() => setPacks([]));
+  }, []);
+
+  useEffect(() => {
+    if (group === "packs") refreshPacks();
+  }, [group, refreshPacks]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -132,6 +171,52 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  /** Download (or re-download) one pack, then re-read the real size. */
+  async function installPack(key: PackStatus["key"]) {
+    setPackBusy(key);
+    setPackNote(null);
+    try {
+      const r =
+        key === "custom_lyrics"
+          ? await api.installModel()
+          : await api.installChromium();
+      if (r.job_id) {
+        const done = await waitForJob(r.job_id, () => undefined);
+        // the download can fail (offline, rate-limited, antivirus lock); the
+        // old code ignored `status` and claimed success every time
+        if (done.status !== "done") {
+          throw new Error(done.error || "安装失败");
+        }
+      }
+      setPackNote(
+        key === "custom_lyrics"
+          ? "自定义歌词扩展包已安装"
+          : "Chromium 扩展包已安装,重启应用后生效",
+      );
+      refreshPacks();
+    } catch (e) {
+      setPackNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPackBusy(null);
+    }
+  }
+
+  async function removePack(key: PackStatus["key"]) {
+    const meta = PACK_META[key];
+    if (!window.confirm(`确定删除「${meta.title}」吗?\n需要时可以再装回来。`)) return;
+    setPackBusy(key);
+    setPackNote(null);
+    try {
+      await api.removePack(key);
+      setPackNote(`已删除「${meta.title}」`);
+      refreshPacks();
+    } catch (e) {
+      setPackNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPackBusy(null);
+    }
+  }
 
   async function testProxy() {
     setTesting(true);
@@ -286,6 +371,62 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   ]}
                   onChange={(v) => update({ theme: v })}
                 />
+                <div className="setrow">
+                  <span className="setlabel">
+                    界面字号
+                    <span className="sethint">只放大界面文字,歌词仍按窗口宽度自适应</span>
+                  </span>
+                  <div className="segmented" role="radiogroup" aria-label="界面字号">
+                    {(
+                      [
+                        ["s", "小"],
+                        ["m", "标准"],
+                        ["l", "大"],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        role="radio"
+                        aria-checked={settings.ui_font === value}
+                        className={settings.ui_font === value ? "on" : ""}
+                        onClick={() => update({ ui_font: value })}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="setrow">
+                  <span className="setlabel">
+                    页面缩放
+                    <span className="sethint">
+                      整个界面的比例,「100%」为默认;{Math.round(settings.page_zoom * 100)}%
+                    </span>
+                  </span>
+                  <div className="zoom-row">
+                    <input
+                      className="zoom-slider"
+                      type="range"
+                      min={80}
+                      max={150}
+                      step={5}
+                      value={Math.round(settings.page_zoom * 100)}
+                      onChange={(e) =>
+                        update({ page_zoom: Number(e.target.value) / 100 })
+                      }
+                      aria-label="页面缩放"
+                    />
+                    <button
+                      type="button"
+                      className="btn small"
+                      onClick={() => update({ page_zoom: 1 })}
+                      disabled={settings.page_zoom === 1}
+                    >
+                      重置
+                    </button>
+                  </div>
+                </div>
                 <Toggle
                   label="减少动效"
                   hint="关闭卡片入场、背景渐入等动画"
@@ -321,17 +462,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
             {group === "lyrics" && (
               <>
-                <Radio
-                  label="默认搜索排序"
-                  hint="上传音频后「时长匹配」才有效，否则自动按逐字优先"
-                  value={settings.search_sort}
-                  options={[
-                    { value: "duration", label: "时长匹配" },
-                    { value: "char", label: "逐字优先" },
-                    { value: "source", label: "按来源" },
-                  ]}
-                  onChange={(v) => update({ search_sort: v })}
-                />
+                <p className="sethint">
+                  搜索结果固定按「逐字且时长接近」优先,其余按时长从小到大,
+                  不再提供排序开关。
+                </p>
                 <div className="setrow">
                   <span className="setlabel">
                     卡片 JLPT 过滤
@@ -426,26 +560,47 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             {group === "packs" && (
               <>
                 <p className="sethint">
-                  两个扩展包都与版本无关：装一次，之后升级应用不用重装。
+                  两个扩展包都与版本无关:装一次,之后升级应用不用重装。
+                  这里显示的是磁盘上的真实占用。
                 </p>
-                <div className="setrow">
-                  <span className="setlabel">
-                    自定义歌词扩展包
-                    <span className="sethint">whisper + 日中翻译模型，约 500MB</span>
-                  </span>
-                  <span className={`packstate${about?.packs.custom_lyrics ? " ok" : ""}`}>
-                    {about?.packs.custom_lyrics ? "已安装" : "未安装"}
-                  </span>
-                </div>
-                <div className="setrow">
-                  <span className="setlabel">
-                    Chromium 扩展包
-                    <span className="sethint">系统浏览器无法用于导出时使用，约 316MB</span>
-                  </span>
-                  <span className={`packstate${about?.packs.chromium ? " ok" : ""}`}>
-                    {about?.packs.chromium ? "已安装" : "未安装"}
-                  </span>
-                </div>
+                {packs.length === 0 && <p className="sethint">读取中...</p>}
+                {packs.map((pack) => {
+                  const meta = PACK_META[pack.key];
+                  const busy = packBusy === pack.key;
+                  return (
+                    <div className="packrow" key={pack.key}>
+                      <div className="packrow-main">
+                        <span className="setlabel">
+                          {meta.title}
+                          <span className="sethint">{meta.hint}</span>
+                        </span>
+                        <span className="sethint packrow-meta">
+                          {pack.installed ? `已安装 · ${humanSize(pack.size)}` : "未安装"} ·{" "}
+                          <code className="setpath">{pack.path}</code>
+                        </span>
+                      </div>
+                      <div className="packrow-actions">
+                        <button
+                          type="button"
+                          className={`btn small${pack.installed ? "" : " primary"}`}
+                          onClick={() => void installPack(pack.key)}
+                          disabled={busy}
+                        >
+                          {busy ? "处理中..." : pack.installed ? "重新安装" : "安装"}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn small"
+                          onClick={() => void removePack(pack.key)}
+                          disabled={busy || !pack.installed}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {packNote && <p className="setnote">{packNote}</p>}
               </>
             )}
 

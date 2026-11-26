@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, waitForJob } from "../api";
 import type { Job, SearchHit, SongSummary, UploadInfo } from "../types";
-import { useSettings } from "../lib/settings";
 
 interface Props {
   songs: SongSummary[];
@@ -61,7 +60,6 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
     Record<string, "ok" | "empty" | "error">
   >({});
   const [sourceErrors, setSourceErrors] = useState<Record<string, string>>({});
-  const [settings, updateSettings] = useSettings();
   const [lyrics, setLyrics] = useState("");
   /* manual version-matching inputs for the search mode: when the source's
      timeline and the uploaded audio disagree in length, the user types the
@@ -144,7 +142,7 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
     }
   }, []);
 
-  const runSearch = useCallback(async (sortOverride?: string) => {
+  const runSearch = useCallback(async () => {
     const q = query.trim();
     if (q.length < 2) {
       setSearchErr("请输入至少 2 个字符");
@@ -159,7 +157,6 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
     try {
       const { results, errors, statuses } = await api.search(q, {
         duration: upload?.duration ?? 0,
-        sort: sortOverride ?? settings.search_sort,
       });
       setHits(results);
       setSourceState(statuses ?? {});
@@ -172,7 +169,7 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
     } finally {
       setSearching(false);
     }
-  }, [query, upload?.duration, settings.search_sort]);
+  }, [query, upload?.duration]);
 
   const track = useCallback(
     async (start: () => Promise<{ job_id: string }>) => {
@@ -447,35 +444,11 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
                 </button>
               </div>
 
-              <div className="sort-row">
-                <span className="sort-label">排序</span>
-                <div className="segmented" role="radiogroup" aria-label="搜索排序">
-                  {(
-                    [
-                      ["duration", "时长匹配"],
-                      ["char", "逐字优先"],
-                      ["source", "按来源"],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      role="radio"
-                      aria-checked={settings.search_sort === value}
-                      className={settings.search_sort === value ? " on" : ""}
-                      onClick={() => {
-                        updateSettings({ search_sort: value });
-                        if (hits.length) void runSearch(value);
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                {!upload?.duration && (
-                  <span className="sort-note">未上传音频，时长匹配按逐字优先处理</span>
-                )}
-              </div>
+              {!upload?.duration && (
+                <p className="sort-note">
+                  未上传音频,无法按长度匹配;列表按「逐字歌词优先、其余按时长」排列。
+                </p>
+              )}
 
               {(Object.keys(sourceState).length > 0 ||
                 Object.keys(sourceErrors).length > 0) && (

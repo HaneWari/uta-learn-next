@@ -99,7 +99,7 @@ export function ExportDialog({
           ))}
         </div>
 
-        <label className="setrow">
+        <div className="setrow">
           <span className="setlabel">
             只导出片段
             <span className="sethint">整首 {fmt(duration)}，留空即整首</span>
@@ -114,7 +114,7 @@ export function ExportDialog({
           >
             <span className="switch-knob" />
           </button>
-        </label>
+        </div>
 
         {clip && (
           <div className="clip-row">

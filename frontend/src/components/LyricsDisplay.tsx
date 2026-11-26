@@ -141,6 +141,8 @@ interface WordViewProps {
   showRomaji?: boolean;
   /** null in export mode: the recorder must render, not interact */
   onPick?: (word: WordTiming, e: React.MouseEvent) => void;
+  /** the pending lookup timer, so a dblclick can cancel it outright */
+  pickTimerRef?: RefObject<number | null>;
 }
 
 function WordView({
@@ -153,13 +155,24 @@ function WordView({
   showFurigana = true,
   showRomaji = true,
   onPick,
+  pickTimerRef,
 }: WordViewProps) {
   const pick = onPick
     ? (e: React.MouseEvent) => {
-        // a click on a glyph is a lookup; a double click is still the line
-        // editor, so stop the first click from also seeking
+        // a click on a glyph is a lookup; a double click is the line editor.
+        // The browser fires `click` before `dblclick`, and the first click's
+        // timer can expire before `dblclick` arrives. Cancelling it from the
+        // dblclick handler (`startEdit`) is the only reliable order — a
+        // "was a dblclick seen?" flag was set too late and also swallowed the
+        // *next* legitimate single click.
         e.stopPropagation();
-        onPick(word, e);
+        const { clientX, clientY } = e;
+        if (pickTimerRef?.current) window.clearTimeout(pickTimerRef.current);
+        const timer = window.setTimeout(() => {
+          if (pickTimerRef) pickTimerRef.current = null;
+          onPick(word, { clientX, clientY } as React.MouseEvent);
+        }, 220);
+        if (pickTimerRef) pickTimerRef.current = timer;
       }
     : undefined;
   return (
@@ -230,6 +243,9 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
      word timings come from alignment and are left alone. ---- */
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ text: "", zh: "" });
+  // a dblclick always starts with a click; the pending lookup is cancelled
+  // here so entering the editor never flashes a word card
+  const pickTimerRef = useRef<number | null>(null);
 
   // a new line scrolls in — drop any half-finished edit so it can't leak
   // onto the next segment
@@ -239,6 +255,10 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
 
   function startEdit() {
     if (!cur || !onPatch) return;
+    if (pickTimerRef.current) {
+      window.clearTimeout(pickTimerRef.current);
+      pickTimerRef.current = null;
+    }
     setDraft({ text: shownText(cur), zh: shownZh(cur) ?? "" });
     setEditing(true);
   }
@@ -314,10 +334,14 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
     if (!ch) return;
 
     let raf = 0;
+    // 逐行微调 shifts the whole line on the timeline (useSyncEngine adds it to
+    // every kana), so the fill has to compare against the same shifted clock.
+    // Without this the wipe finished in one frame — "高亮变成瞬发".
+    const shift = cur.line_offset ?? 0;
     const span = Math.max(0.001, ch.end - ch.start);
     const loop = () => {
       // no audio element (lyrics-only dataset): follow the synthetic clock
-      const now = audio ? audio.currentTime - offset : clockRef.current ?? 0;
+      const now = (audio ? audio.currentTime - offset : clockRef.current ?? 0) - shift;
       const p = Math.min(1, Math.max(0, (now - ch.start) / span));
       el.style.setProperty("--p", p.toFixed(3));
       raf = requestAnimationFrame(loop);
@@ -335,7 +359,7 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
       {/* the 下一句 layer is a per-song switch; hiding it also stops the row
           from reserving vertical space, so the current line can breathe */}
       <div className={`next-block${next && showNext ? "" : " blank"}`}>
-        <span className="next-label">{next ? "next" : ""}</span>
+        <span className="next-label">{next && showNext ? "next" : ""}</span>
         {next && showNext ? (
           <div className="next-body" key={`n-${next.id}`}>
             {next.words.length ? (
@@ -451,6 +475,7 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
                       romaji={displayRomaji(w, settings)}
                       showFurigana={showFurigana}
                       showRomaji={showRomaji}
+                      pickTimerRef={pickTimerRef}
                       onPick={
                         onWordClick && cur
                           ? (word, e) =>

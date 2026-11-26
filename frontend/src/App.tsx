@@ -24,7 +24,6 @@ type Tab = "config" | "stage";
 const DEFAULT_BG: StageBackground = { mode: "default", url: null };
 
 export default function App() {
-  useTheme();
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const renderMode = params.get("render") === "1";
   const initialSong = params.get("song");
@@ -38,6 +37,9 @@ export default function App() {
   const [envOpen, setEnvOpen] = useState(false);
   const [envChecking, setEnvChecking] = useState(false);
   const [background, setBackground] = useState<StageBackground>(DEFAULT_BG);
+  // a custom stage photo is dark; the theme follows it unless the user pinned
+  // light/dark explicitly
+  useTheme(background.mode === "custom", renderMode);
   const [bgOpen, setBgOpen] = useState(false);
   const [offsetOpen, setOffsetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -339,6 +341,11 @@ export default function App() {
         <BackgroundModal
           current={background}
           onClose={() => setBgOpen(false)}
+          // A custom photo is dark. `useTheme(background.mode === "custom")`
+          // derives dark from it while 跟随系统 is selected, so the stage flips
+          // the moment the image is applied — and flips back when the default
+          // background returns. Pinning `settings.theme` here would leave the
+          // user stuck in dark after they undo the background.
           onApplied={setBackground}
         />
       )}

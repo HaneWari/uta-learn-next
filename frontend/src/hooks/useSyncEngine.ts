@@ -204,7 +204,12 @@ export function useSyncEngine(
         let disp = 0;
         if (at >= 0) {
           disp = flatKana[at].segmentId;
-          const segEnd = segments[disp]?.end;
+          // The line's own offset shifts its displayed end too. Comparing the
+          // raw `end` here rolled the stage to the next line at the original
+          // time, so nudging a line earlier made the highlight look instant.
+          const segEnd = segments[disp]
+            ? segments[disp].end + (segments[disp].line_offset ?? 0)
+            : null;
           if (segEnd != null && time > segEnd) {
             disp = Math.min(disp + 1, segments.length - 1);
           }

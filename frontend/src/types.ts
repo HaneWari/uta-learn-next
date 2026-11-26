@@ -206,6 +206,8 @@ export interface AppSettings {
   long_vowel: "ou" | "macron" | "oo";
   theme: "system" | "light" | "dark";
   reduce_motion: boolean;
+  ui_font: "s" | "m" | "l";
+  page_zoom: number;
   default_layers: {
     furigana: boolean;
     romaji: boolean;
@@ -213,7 +215,6 @@ export interface AppSettings {
     next_line: boolean;
     cards: boolean;
   };
-  search_sort: "duration" | "char" | "source";
   jlpt_max: number;
   proxy_mode: "auto" | "system" | "manual" | "off";
   proxy_url: string;
@@ -233,6 +234,14 @@ export interface AboutInfo {
   paths: { app: string; data: string; exports: string };
   packs: { custom_lyrics: boolean; chromium: boolean };
   dev: boolean;
+}
+
+/** 设置 → 扩展包 的一行:装没装、占多大 */
+export interface PackStatus {
+  key: "custom_lyrics" | "chromium";
+  installed: boolean;
+  path: string;
+  size: number;
 }
 
 /** one saved encounter in the personal word book */
