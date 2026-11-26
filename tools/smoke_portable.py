@@ -65,16 +65,21 @@ def main() -> int:
     env["PYTHONIOENCODING"] = "utf-8"
     env["UTALEARN_DEV"] = "1"          # the smoke run must not depend on a token
     env["UTALEARN_TELEMETRY"] = "0"
+    # no window, no tab: the point is the launcher path, not a GUI session
+    env["UTALEARN_NO_WINDOW"] = "1"
+    env["UTALEARN_NO_BROWSER"] = "1"
     if (base / "browsers").is_dir():
         env["PLAYWRIGHT_BROWSERS_PATH"] = str(base / "browsers")
 
-    port = free_port()
+    # an explicit port lets CI keep a predictable URL while still exercising
+    # the real launcher; without one the launcher picks, exactly like a user run
+    port = int(os.environ.get("UTALEARN_SMOKE_PORT") or free_port())
     base_url = f"http://127.0.0.1:{port}"
-    print(f"启动 {exe} @ {base_url}", flush=True)
+    print(f"启动 {exe} desktop.py @ {base_url}", flush=True)
     out = subprocess.PIPE
     proc = subprocess.Popen(
-        [str(exe), "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", str(port)],
-        cwd=base / "backend", env=env, stdout=out, stderr=subprocess.STDOUT, text=True,
+        [str(exe), "desktop.py", "--port", str(port), "--allow-multiple"],
+        cwd=base, env=env, stdout=out, stderr=subprocess.STDOUT, text=True,
     )
     try:
         wait_ready(base_url, proc)

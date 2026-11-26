@@ -97,6 +97,10 @@ def _save_window_state(window) -> None:
 def open_in_browser(url: str) -> bool:
     import webbrowser
 
+    # the smoke test and CI have no desktop session; opening a browser there
+    # would either fail noisily or leave a stray tab on the build machine
+    if os.environ.get("UTALEARN_NO_BROWSER") == "1":
+        return True
     try:
         return webbrowser.open(url)
     except Exception:  # noqa: BLE001
@@ -300,9 +304,11 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--browser", action="store_true",
                     help="只启动后端并用系统浏览器打开")
-    args = ap.parse_args()
     ap.add_argument("--allow-multiple", action="store_true",
                     help="debug only: skip the single-instance check")
+    # every option has to be registered *before* parse_args: an argument added
+    # afterwards never reaches the namespace and reading it raises
+    args = ap.parse_args()
 
     if args.allow_multiple:
         return _run(args)

@@ -394,9 +394,19 @@ def make_zip(base: Path, out: Path, extra: dict[str, Path] | None = None) -> Pat
     total = 0
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
         for f in base.rglob("*"):
-            if f.is_file():
-                z.write(f, f"UtaLearnNext/{f.relative_to(base)}")
-                total += 1
+            if not f.is_file():
+                continue
+            rel = f.relative_to(base)
+            # A build folder smoke-tested in place carries the interpreter's
+            # bytecode cache and a `localdata/` with logs. Neither belongs in a
+            # user's fresh install: the cache is dead weight and the logs are
+            # this build machine's history.
+            if "__pycache__" in rel.parts or rel.suffix == ".pyc":
+                continue
+            if rel.parts[0] in ("localdata", "exports", "_update", "app.prev"):
+                continue
+            z.write(f, f"UtaLearnNext/{rel}")
+            total += 1
         for folder, src in (extra or {}).items():
             for f in src.rglob("*"):
                 if f.is_file():
