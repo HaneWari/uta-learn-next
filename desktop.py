@@ -16,6 +16,7 @@ and anyone debugging the server wants.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import socket
@@ -29,6 +30,35 @@ from pathlib import Path
 APP_ROOT = Path(__file__).resolve().parent
 BACKEND = APP_ROOT / "backend"
 WINDOW_STATE = APP_ROOT / "localdata" / "_ui" / "window.json"
+
+
+def _silence_pythonw() -> None:
+    """Give `pythonw.exe` a sink for stdout/stderr instead of `None`.
+
+    A GUI interpreter starts with both streams set to `None`, so anything that
+    touches `.isatty()` or `.write()` dies — uvicorn's log formatter calls
+    `sys.stdout.isatty()` while configuring itself, which killed the windowed
+    `.vbs` entry point on start-up. A throwaway `StringIO` keeps those calls
+    harmless; the app's real log still goes to `localdata/logs/`.
+    """
+    for name in ("stdout", "stderr"):
+        if getattr(sys, name) is None:
+            setattr(sys, name, io.StringIO())
+
+
+def prepare_env() -> None:
+    """Make the portable layout visible without a `.cmd` wrapper.
+
+    The extension packs are folders next to the app (`browsers/`, `models/`),
+    and both libraries that read them only look at environment variables.
+    Setting them here rather than in a launcher keeps every entry point — the
+    `.vbs`, the console `.cmd`, `desktop.py` run by hand — on the same path.
+    """
+    os.environ.setdefault("PYTHONHOME", str(APP_ROOT / "python"))
+    os.environ.setdefault("HF_HOME", str(APP_ROOT / "models"))
+    browsers = APP_ROOT / "browsers"
+    if browsers.is_dir():
+        os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browsers))
 
 
 def free_port(start: int = 8000, end: int = 8010) -> int:
@@ -300,6 +330,8 @@ def run_window(url: str) -> bool:
 
 
 def main() -> int:
+    _silence_pythonw()
+    prepare_env()
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--browser", action="store_true",

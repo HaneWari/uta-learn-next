@@ -13,7 +13,9 @@ learning app (FastAPI backend + React/Vite frontend, packaged as a no-install po
   `export` (playwright), `gpu` (torch), `desktop` (pywebview), `dev` (ruff/pytest).
 - **Desktop** — `desktop.py` at the repo root runs the server in-process, picks a free
   port, waits for the API and opens a pywebview window (system browser if WebView2 is
-  missing). The portable build ships `启动 Uta Learn Next.vbs` plus a console-only `.cmd`.
+  missing). The portable build ships `启动 Uta Learn Next.vbs` (the double-click entry)
+  plus a console-only `.cmd` for debugging. `desktop.py` sets the extension-pack
+  environment itself, so the `.vbs` does not have to duplicate a `.cmd` wrapper's work.
 - **Frontend** — `frontend/`, React 19 + TypeScript + Vite 7. Strict TS (`strict`,
   `noUnusedLocals`, `noUnusedParameters`, `erasableSyntaxOnly`). Pure logic lives in
   `src/lib/` so vitest can cover it without mounting React.

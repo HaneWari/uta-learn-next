@@ -272,36 +272,6 @@ def write_build_info(base: Path, ffmpeg_ver: str,
     return info
 
 
-LAUNCHER_LINES = [
-    "@echo off",
-    "REM 免安装启动器:不写注册表、不改 PATH、不需要管理员权限。",
-    "REM 默认用 pythonw 启动桌面窗口;需要看日志时用「(控制台)」那个入口。",
-    "setlocal",
-    'cd /d "%~dp0"',
-    'set "PYTHONHOME=%~dp0python"',
-    'set "PYTHONPATH=%~dp0python;%~dp0python\\Lib\\site-packages"',
-    'if exist "%~dp0browsers" set "PLAYWRIGHT_BROWSERS_PATH=%~dp0browsers"',
-    "REM 语音识别模型放在 models/ 下(自定义歌词扩展包解压进来即是);设了",
-    "REM HF_HOME 后 huggingface_hub 也优先用它,扩展包与缓存共用一处。",
-    'if not defined HF_HOME set "HF_HOME=%~dp0models"',
-    "REM 歌词源/whisper 模型要联网。系统代理不一定会写进 *_PROXY 环境变量,",
-    "REM 而 httpx 只认 env——探测常见本地代理端口并显式导出,让有 Clash/V2Ray",
-    "REM 的机器开箱即用,没代理的机器则直连不受影响。",
-    'if not defined HTTPS_PROXY for %%P in (7890 7897 10808 1080 8889 4780) do (',
-    "  if not defined HTTPS_PROXY (",
-    '    "%~dp0python\\python.exe" -c "import socket,sys;s=socket.socket();s.settimeout(0.25);sys.exit(0 if s.connect_ex((\'127.0.0.1\',%%P))==0 else 1)" 2>nul',
-    '    if not errorlevel 1 set "HTTPS_PROXY=http://127.0.0.1:%%P"',
-    "  )",
-    ")",
-    'if defined HTTPS_PROXY if not defined HTTP_PROXY set "HTTP_PROXY=%HTTPS_PROXY%"',
-    "REM desktop.py 负责选端口、等后端就绪、开窗口;窗口起不来就退回系统浏览器。",
-    'if /i "%~1"=="--console" (',
-    '  "%~dp0python\\python.exe" "%~dp0desktop.py"',
-    ") else (",
-    '  "%~dp0python\\pythonw.exe" "%~dp0desktop.py"',
-    ")",
-]
-
 CONSOLE_LAUNCHER_LINES = [
     "@echo off",
     "REM 调试入口:保留控制台,能看到后端日志。",
@@ -326,16 +296,17 @@ VBS_LINES = [
 
 
 def write_launcher(base: Path) -> None:
-    p = base / "启动 Uta Learn Next.cmd"
-    # binary write: text mode turns \r\n into \r\r\n on Windows
-    p.write_bytes(("\r\n".join(LAUNCHER_LINES) + "\r\n").encode("utf-8"))
-    say(f"已生成 {p.name}")
+    # A previous build left `启动 Uta Learn Next.cmd` here and this build does
+    # not delete it. It has to go explicitly: the .vbs is now the single
+    # double-click entry and a stale .cmd beside it only confuses users.
+    stale = base / "启动 Uta Learn Next.cmd"
+    stale.unlink(missing_ok=True)
     console = base / "启动 Uta Learn Next (控制台).cmd"
     console.write_bytes(("\r\n".join(CONSOLE_LAUNCHER_LINES) + "\r\n").encode("utf-8"))
     vbs = base / "启动 Uta Learn Next.vbs"
     vbs.write_bytes(("\r\n".join(VBS_LINES) + "\r\n").encode("utf-8"))
     shutil.copy2(ROOT / "desktop.py", base / "desktop.py")
-    say("已生成 desktop.py 与三个启动入口")
+    say(f"已生成 desktop.py 与 {console.name} / {vbs.name}")
 
 
 # Packages that only exist to *build* an environment, or that nothing on the
@@ -469,7 +440,7 @@ def make_addon_zip(folder: Path, out: Path) -> Path:
     """Zip a single extension folder as `<folder>/...` — no UtaLearnNext wrapper.
 
     Extension packs drop straight into the app folder (`browsers/` or
-    `models/` next to `启动 Uta Learn Next.cmd`), so the archive carries the
+    `models/` next to `启动 Uta Learn Next.vbs`), so the archive carries the
     folder itself, not a wrapper the unpacker would have to peel off.
     """
     out.parent.mkdir(parents=True, exist_ok=True)

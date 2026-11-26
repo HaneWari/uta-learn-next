@@ -60,10 +60,13 @@
 | `UtaLearnNext-chromium.zip` | ~209 MB | 可选扩展包（**版本无关**）：内置 Chromium。本机没有 Chromium 内核浏览器又想导出视频时才需要——「导出视频」会先检测环境，缺了可点「安装 Chromium 扩展包」自动装好；手动解压到应用目录得到 `browsers/` 也行。 |
 | `UtaLearnNext-custom-lyrics.zip` | ~265 MB | 可选扩展包（**版本无关**）：自定义歌词用的 whisper 识别 + 日→中翻译模型。在「自定义歌词」面板点「下载并安装扩展」自动装到 `models/`；手动解压到应用目录得到 `models/`（内含 `whisper-small/` 与 `translate-ja-zh/`）也行。不用自定义歌词就不用下。 |
 
-核心包解压后双击 **`启动 Uta Learn Next.cmd`** 即可。自带 Python 运行时、ffmpeg/ffprobe
+核心包解压后双击 **`启动 Uta Learn Next.vbs`** 即可。自带 Python 运行时、ffmpeg
 与已构建好的前端；不写注册表、不改 PATH、不需要管理员权限。需要导出但本机没有
 Chromium 内核浏览器（Edge 也算，Windows 自带）时，再把 chromium 扩展包解压进来就行——
 程序下次启动会自动识别 `browsers/`，不用装、不用改配置。
+
+同目录的 `启动 Uta Learn Next (控制台).cmd` 是排障入口:它保留黑色窗口,能看到后端日志。
+程序启动异常时先用它跑一次,`localdata/logs/utalearn.log` 里也有完整记录。
 
 两个扩展包都**与版本无关**：浏览器二进制和冻结的语音模型远比应用更新慢，
 下载一次即可在任意版本上复用，升级应用不必重下。
