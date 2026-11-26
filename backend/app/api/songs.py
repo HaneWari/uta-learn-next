@@ -261,8 +261,10 @@ def api_vocab_list(song: str | None = None):
 
 @router.post("/api/vocab")
 def api_vocab_add(item: VocabItem):
+    # `vocab.add` reads a plain mapping; handing it the pydantic model raised
+    # AttributeError and every “加入生词本” came back as a 500.
     try:
-        return vocab.add(item)
+        return vocab.add(item.model_dump())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from None
 

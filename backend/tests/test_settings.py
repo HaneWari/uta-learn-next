@@ -58,6 +58,11 @@ class TestSave:
         assert settings.reset()["theme"] == "system"
         assert not settings.SETTINGS_FILE.exists()
 
+    def test_display_scale_defaults_exist(self):
+        data = settings.load()
+        assert data["ui_font"] == "m"
+        assert data["page_zoom"] == 1.0
+
 
 class TestProxyResolver:
     def test_off_mode_never_returns_a_proxy(self, monkeypatch):

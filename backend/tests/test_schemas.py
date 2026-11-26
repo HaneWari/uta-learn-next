@@ -13,7 +13,6 @@ class TestModels:
     def test_search_defaults_are_usable(self):
         req = schemas.SearchRequest(query="夜に駆ける")
         assert req.sources is None
-        assert req.sort == "duration"
 
     def test_unknown_fields_survive(self):
         """A rollback must not break on a field the newer front-end sends."""

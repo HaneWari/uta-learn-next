@@ -23,7 +23,6 @@ class SearchRequest(Lenient):
     query: str = ""
     sources: list[str] | None = None
     duration: float = 0.0
-    sort: str = "duration"
 
 
 class BuildRequest(Lenient):

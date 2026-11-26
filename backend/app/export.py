@@ -352,7 +352,7 @@ def _grab(video: Path, t: float, out: Path) -> object:
     import numpy as np
     from PIL import Image
 
-    subprocess.run(
+    binaries.run(
         [binaries.ffmpeg(), "-y", "-loglevel", "error", "-ss", f"{t:.3f}",
          "-i", str(video), "-frames:v", "1", str(out)],
         check=True, capture_output=True,
@@ -413,7 +413,7 @@ def _has_video(path: Path) -> bool:
     "successful" export into a file with no picture at all.
     """
     try:
-        out = subprocess.run(
+        out = binaries.run(
             [binaries.ffmpeg(), "-hide_banner", "-i", str(path)],
             capture_output=True, text=True, check=False,
         ).stderr
@@ -456,7 +456,7 @@ def _mux(raw: Path, audio: Path | None, out: Path, duration: float,
             "-t", f"{duration:.3f}",
             "-c:v", "libx264", "-preset", "medium", "-crf", "20",
             "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)]
-    subprocess.run(cmd, check=True, capture_output=True)
+    binaries.run(cmd, check=True, capture_output=True)
 
 
 def render(base_url: str, song: str, audio: Path | None, out: Path,

@@ -93,46 +93,51 @@ class TestSearchAll:
 
 
 class TestSortResults:
-    def test_duration_mode_puts_the_closest_first(self):
+    def test_the_closest_hit_comes_first(self):
         rows = [song("far", 300), song("near", 103), song("exact", 100)]
-        ordered = sources.sort_results(rows, "duration", audio_duration=100)
+        ordered = sources.sort_results(rows, audio_duration=100)
         assert [r["title"] for r in ordered] == ["exact", "near", "far"]
 
-    def test_duration_mode_prefers_per_char_on_a_tie(self):
+    def test_a_per_char_hit_beats_a_line_hit_of_the_same_length(self):
         rows = [song("line", 100, kind="line"), song("char", 100, kind="char")]
-        ordered = sources.sort_results(rows, "duration", audio_duration=100)
+        ordered = sources.sort_results(rows, audio_duration=100)
         assert [r["title"] for r in ordered] == ["char", "line"]
 
-    def test_char_mode_ignores_the_audio_length_order(self):
-        rows = [song("near-line", 100, kind="line"), song("far-char", 400, kind="char")]
-        ordered = sources.sort_results(rows, "char", audio_duration=100)
-        assert [r["title"] for r in ordered] == ["far-char", "near-line"]
+    def test_only_close_per_char_hits_jump_the_queue(self):
+        rows = [
+            song("far-char", 400, kind="char"),
+            song("near-line", 100, kind="line"),
+            song("near-char", 101, kind="char"),
+        ]
+        ordered = sources.sort_results(rows, audio_duration=100)
+        # near-char is the only "will actually line up" hit; the other two keep
+        # the fixed duration order
+        assert [r["title"] for r in ordered] == ["near-char", "near-line", "far-char"]
 
-    def test_source_mode_groups_qq_then_kugou_then_lrclib(self):
-        rows = [song("l", 100, source="lrclib"), song("k", 300, source="kugou"),
-                song("q", 500, source="qq")]
-        ordered = sources.sort_results(rows, "source", audio_duration=100)
-        assert [r["source"] for r in ordered] == ["qq", "kugou", "lrclib"]
-
-    def test_duration_mode_without_audio_degrades_to_char(self):
+    def test_without_audio_per_char_hits_come_first(self):
         rows = [song("line", 100, kind="line"), song("char", 900, kind="char")]
-        ordered = sources.sort_results(rows, "duration", audio_duration=0)
+        ordered = sources.sort_results(rows, audio_duration=0)
         assert [r["title"] for r in ordered] == ["char", "line"]
+
+    def test_each_group_is_sorted_by_duration_ascending(self):
+        rows = [song("b", 300), song("a", 200), song("c", 400)]
+        ordered = sources.sort_results(rows, audio_duration=2000)
+        assert [r["title"] for r in ordered] == ["a", "b", "c"]
+
+    def test_hits_without_a_duration_sort_last(self):
+        rows = [song("unknown", 0), song("known", 500)]
+        ordered = sources.sort_results(rows, audio_duration=0)
+        assert [r["title"] for r in ordered] == ["known", "unknown"]
 
     def test_close_hits_get_a_duration_match_badge(self):
         rows = [song("near", 101.5), song("far", 120)]
-        ordered = sources.sort_results(rows, "duration", audio_duration=100)
+        ordered = sources.sort_results(rows, audio_duration=100)
         assert [r["duration_match"] for r in ordered] == [True, False]
 
     def test_no_audio_means_no_badges(self):
         rows = [song("a", 100)]
-        ordered = sources.sort_results(rows, "char", audio_duration=0)
+        ordered = sources.sort_results(rows, audio_duration=0)
         assert ordered[0]["duration_match"] is False
-
-    def test_an_unknown_mode_falls_back_to_duration(self):
-        rows = [song("far", 300), song("near", 101)]
-        ordered = sources.sort_results(rows, "nonsense", audio_duration=100)
-        assert [r["title"] for r in ordered] == ["near", "far"]
 
 
 class TestProxyLifetime:

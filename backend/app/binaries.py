@@ -8,10 +8,32 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 APP_ROOT = Path(__file__).resolve().parents[2]
+
+# A windowed interpreter (`pythonw.exe`) has no console, so every child process
+# Windows spawns would otherwise get a fresh console window — the black rectangle
+# that flashed on start-up, on 生成, and on any ffmpeg call. `CREATE_NO_WINDOW`
+# suppresses it for all of them; it is a no-op on POSIX.
+NO_WINDOW = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+
+
+def run(cmd, **kwargs) -> subprocess.CompletedProcess:
+    """`subprocess.run` with the console window suppressed."""
+    # `creationflags` must be OR-ed, not overwritten: callers that already pass
+    # CREATE_NEW_PROCESS_GROUP (or anything else) would otherwise lose either
+    # their flag or the no-window one.
+    kwargs["creationflags"] = kwargs.get("creationflags", 0) | NO_WINDOW
+    return subprocess.run(cmd, **kwargs)
+
+
+def popen(cmd, **kwargs) -> subprocess.Popen:
+    """`subprocess.Popen` with the console window suppressed."""
+    kwargs["creationflags"] = kwargs.get("creationflags", 0) | NO_WINDOW
+    return subprocess.Popen(cmd, **kwargs)
 
 
 def _names(tool: str) -> list[str]:
@@ -52,12 +74,11 @@ def probe_duration(path, timeout: float = 20.0) -> float:
     developer machine, absent from the package.
     """
     import re
-    import subprocess
 
     try:
         # `text=True` normally yields str, but a redirect/encoding mishap can
         # leave it None — the regex below must not be handed a non-string
-        out = subprocess.run(
+        out = run(
             [ffmpeg(), "-hide_banner", "-i", str(path)],
             capture_output=True, text=True, errors="replace",
             timeout=timeout, check=False,

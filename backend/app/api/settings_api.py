@@ -29,22 +29,31 @@ def api_settings_get():
 
 @router.patch("/api/settings")
 def api_settings_patch(patch: SettingsPatch):
-    if not isinstance(patch, dict):
-        raise HTTPException(status_code=400, detail="设置必须是对象")
+    # `patch` is a Pydantic model (extra="allow"), never a dict: iterating it
+    # yields (name, value) pairs and `.get` does not exist. Turn it into a
+    # plain mapping once, then validate that mapping.
+    data = patch.model_dump()
     allowed = set(settings.DEFAULTS)
-    bad = set(patch) - allowed
+    bad = set(data) - allowed
     if bad:
         raise HTTPException(status_code=400, detail=f"未知设置项: {sorted(bad)}")
-    mode = patch.get("proxy_mode")
+    mode = data.get("proxy_mode")
     if mode is not None and mode not in ("auto", "system", "manual", "off"):
         raise HTTPException(status_code=400, detail="代理模式无效")
-    if patch.get("long_vowel") not in (None, "ou", "macron", "oo"):
+    if data.get("long_vowel") not in (None, "ou", "macron", "oo"):
         raise HTTPException(status_code=400, detail="长音写法无效")
-    if patch.get("particle_reading") not in (None, "pron", "literal"):
+    if data.get("particle_reading") not in (None, "pron", "literal"):
         raise HTTPException(status_code=400, detail="助词读法无效")
-    if patch.get("theme") not in (None, "system", "light", "dark"):
+    if data.get("theme") not in (None, "system", "light", "dark"):
         raise HTTPException(status_code=400, detail="主题无效")
-    return settings.save(patch)
+    if data.get("ui_font") not in (None, "s", "m", "l"):
+        raise HTTPException(status_code=400, detail="界面字号无效")
+    zoom = data.get("page_zoom")
+    if zoom is not None and not isinstance(zoom, (int, float)):
+        raise HTTPException(status_code=400, detail="页面缩放无效")
+    if zoom is not None and not 0.8 <= float(zoom) <= 1.5:
+        raise HTTPException(status_code=400, detail="页面缩放需在 0.8 - 1.5 之间")
+    return settings.save(data)
 
 
 @router.post("/api/settings/reset")

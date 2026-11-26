@@ -5,7 +5,6 @@ import io
 import os
 import re
 import shutil
-import subprocess
 import sys
 import time
 import zipfile
@@ -14,7 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
-from app import export, jobs, render_frames, settings
+from app import binaries, export, jobs, render_frames, settings
 from app.datasets import audio_duration, dataset, find_audio, meta_flag
 from app.paths import APP_ROOT, BASE_URL, EXPORT_DIR
 from app.schemas import ExportRequest, RevealRequest
@@ -97,7 +96,7 @@ def api_export_fix():
         progress(0.4, "检查 Playwright…")
         if not checks["playwright"]:
             progress(0.45, "安装 playwright …")
-            subprocess.run(
+            binaries.run(
                 [sys.executable, "-m", "pip", "install", "-q", "playwright"],
                 check=True, capture_output=True)
         # launch failing means no usable browser; launch succeeding but
@@ -106,7 +105,7 @@ def api_export_fix():
         if not checks["browser_launch"] or not checks.get("record_video", True):
             progress(0.55, "下载 Chromium（约 130MB，请稍候）…")
             try:
-                subprocess.run(
+                binaries.run(
                     # `record_video` needs playwright's own ffmpeg-* build too —
                     # `install chromium` alone leaves new_context() demanding
                     # ffmpeg-win64.exe that was never downloaded
@@ -152,21 +151,20 @@ def api_export_reveal(payload: RevealRequest | None = None):
     Only the folder itself — no path from the request is honoured, so this can
     never be turned into "open anything on this machine".
     """
-    import subprocess
     import sys
 
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
     name = (payload.file if payload else None)
     if sys.platform == "win32":
         if name:
-            subprocess.Popen(["explorer", "/select,", str(EXPORT_DIR / name)])
+            binaries.popen(["explorer", "/select,", str(EXPORT_DIR / name)])
         else:
-            subprocess.Popen(["explorer", str(EXPORT_DIR)])
+            binaries.popen(["explorer", str(EXPORT_DIR)])
     elif sys.platform == "darwin":
         target = str(EXPORT_DIR / name) if name else str(EXPORT_DIR)
-        subprocess.Popen(["open", "-R", target] if name else ["open", target])
+        binaries.popen(["open", "-R", target] if name else ["open", target])
     else:
-        subprocess.Popen(["xdg-open", str(EXPORT_DIR)])
+        binaries.popen(["xdg-open", str(EXPORT_DIR)])
     return {"opened": str(EXPORT_DIR)}
 
 

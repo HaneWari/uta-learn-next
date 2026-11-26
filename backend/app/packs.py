@@ -135,6 +135,52 @@ def custom_lyrics_installed(root: Path | None = None) -> bool:
     return whisper_installed(root) and translate_installed(root)
 
 
+def folder_size(path: Path) -> int:
+    """Bytes actually on disk for a pack folder, 0 when it is missing."""
+    if not path.is_dir():
+        return 0
+    total = 0
+    try:
+        for f in path.rglob("*"):
+            if f.is_file():
+                try:
+                    total += f.stat().st_size
+                except OSError:
+                    continue
+    except OSError:
+        return total
+    return total
+
+
+def installed_size(name: str, root: Path | None = None) -> int:
+    """Size of one installed pack (`models` or `browsers`) in bytes."""
+    if name == "models":
+        return folder_size((root or APP_ROOT) / "models")
+    # Deliberately *not* `browsers_dir()`: that honours PLAYWRIGHT_BROWSERS_PATH,
+    # which can point at the user's global cache. This page reports the pack
+    # that lives inside the app folder.
+    return folder_size((root or APP_ROOT) / "browsers")
+
+
+def remove(name: str, root: Path | None = None) -> bool:
+    """Delete one installed pack. Returns True when something was removed.
+
+    Only the pack directories are touched (`models/`, `browsers/`): they are
+    re-downloadable content, never user data. A pack that is not installed is
+    a no-op so the button is safe to click twice.
+    """
+    # Resolve against the app folder, never PLAYWRIGHT_BROWSERS_PATH: deleting
+    # a machine-wide Playwright cache because the user clicked 删除 in our
+    # settings page would be destructive far outside this app.
+    target = (root or APP_ROOT) / name
+    if target.resolve() == Path(target.anchor or "/").resolve():
+        return False
+    if not target.is_dir():
+        return False
+    shutil.rmtree(target, ignore_errors=True)
+    return True
+
+
 def install_custom_lyrics(progress=None) -> Path:
     root = install_asset(CUSTOM_ASSET, "models", progress=progress,
                          label="自定义歌词扩展包（约 265MB）")

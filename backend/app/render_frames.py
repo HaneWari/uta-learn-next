@@ -129,9 +129,9 @@ def _start_encoder(out: Path, width: int, height: int) -> subprocess.Popen:
            "-crf", "18", "-pix_fmt", "yuv420p",
            "-vf", f"scale={width}:{height}",
            "-movflags", "+faststart", str(out)]
-    return subprocess.Popen(cmd, stdin=subprocess.PIPE,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL)
+    return binaries.popen(cmd, stdin=subprocess.PIPE,
+                          stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL)
 
 
 def render(base_url: str, song: str, audio: Path | None, out: Path,
@@ -214,4 +214,4 @@ def _concat(parts: list[Path], audio: Path | None, out: Path,
         cmd += ["-map", "0:v:0", "-c:v", "copy", "-an",
                 "-t", f"{duration:.3f}"]
     cmd += ["-movflags", "+faststart", str(out)]
-    subprocess.run(cmd, check=True, capture_output=True)
+    binaries.run(cmd, check=True, capture_output=True)

@@ -11,7 +11,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
-from app import fallback, jobs, local_lyrics, settings
+from app import fallback, jobs, local_lyrics
 from app import translate as translate_mod
 from app.builder import build as build_song
 from app.datasets import (
@@ -54,11 +54,9 @@ async def api_search(payload: SearchRequest):
         audio_duration = float(payload.duration or 0)
     except (TypeError, ValueError):
         audio_duration = 0.0
-    sort = payload.sort or settings.get("search_sort", "duration")
     results, errors, statuses = await run_in_threadpool(
-        search_all, query, names, audio_duration, sort)
-    return {"results": results, "errors": errors, "statuses": statuses,
-            "sort": sort if sort in ("duration", "char", "source") else "duration"}
+        search_all, query, names, audio_duration)
+    return {"results": results, "errors": errors, "statuses": statuses}
 
 
 @router.post("/api/uploads")

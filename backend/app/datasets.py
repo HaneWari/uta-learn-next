@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 import shutil
-import subprocess
 import time
 from pathlib import Path
 
@@ -176,7 +175,7 @@ def save_dataset(name: str, song: dict, audio: Path | None) -> Path:
 def _transcode(src: Path, dst: Path) -> None:
     from app import binaries
 
-    subprocess.run(
+    binaries.run(
         [binaries.ffmpeg(), "-y", "-v", "error", "-i", str(src),
          "-vn", "-c:a", "aac", "-b:a", "192k", str(dst)],
         check=True, capture_output=True,

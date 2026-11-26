@@ -31,6 +31,8 @@ DEFAULTS: dict[str, Any] = {
     "long_vowel": "ou",              # ou | macron | oo
     "theme": "system",               # system | light | dark
     "reduce_motion": False,
+    "ui_font": "m",                  # s | m | l : 界面字号
+    "page_zoom": 1.0,                # 0.8 - 1.5 : 整页缩放
     "default_layers": {
         "furigana": True,
         "romaji": True,
@@ -39,7 +41,6 @@ DEFAULTS: dict[str, Any] = {
         "cards": True,
     },
     # 歌词
-    "search_sort": "duration",       # duration | char | source
     "jlpt_max": 0,                   # 0 = 不过滤
     # 网络
     "proxy_mode": "auto",            # auto | system | manual | off

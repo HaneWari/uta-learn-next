@@ -508,10 +508,6 @@ def get_source(name: str):
 SEARCH_TIMEOUT = 12.0
 
 # `按来源` 排序时的固定顺序:用户在某个源上找到了习惯的版本
-SOURCE_ORDER = {"qq": 0, "kugou": 1, "lrclib": 2}
-SORT_MODES = ("duration", "char", "source")
-
-
 def _search_one(key: str, src, query: str) -> tuple[str, list[dict], str | None]:
     try:
         return key, [s.as_dict() for s in src.search(query)], None
@@ -520,8 +516,7 @@ def _search_one(key: str, src, query: str) -> tuple[str, list[dict], str | None]
 
 
 def search_all(query: str, names: list[str] | None = None,
-               audio_duration: float = 0.0,
-               sort: str = "duration"
+               audio_duration: float = 0.0
                ) -> tuple[list[dict], list[dict], dict[str, str]]:
     """Search every source in parallel; failures are per-source, never raised.
 
@@ -544,7 +539,7 @@ def search_all(query: str, names: list[str] | None = None,
     cached = search_cache.get(query, names)
     if cached is not None:
         cached_results, cached_errors, cached_statuses = cached
-        return (sort_results(cached_results, sort, audio_duration),
+        return (sort_results(cached_results, audio_duration),
                 cached_errors, cached_statuses)
 
     pool = ThreadPoolExecutor(max_workers=len(wanted), thread_name_prefix="search")
@@ -569,41 +564,46 @@ def search_all(query: str, names: list[str] | None = None,
         pool.shutdown(wait=False, cancel_futures=True)
 
     search_cache.put(query, names, results, errors, statuses)
-    return sort_results(results, sort, audio_duration), errors, statuses
+    return sort_results(results, audio_duration), errors, statuses
 
 
-def sort_results(results: list[dict], mode: str, audio_duration: float = 0.0) -> list[dict]:
-    """Order search hits for the config page.
+def sort_results(results: list[dict], audio_duration: float = 0.0) -> list[dict]:
+    """Order search hits: best-aligned first, everything else by length.
 
-    * `duration` — closest to the uploaded audio first (the version that will
-      actually line up); ties prefer per-character lyrics.
-    * `char` — per-character lyrics first, then by duration distance.
-    * `source` — QQ → 酷狗 → Lrclib, closest duration inside each group.
+    There used to be a user-visible sort switch (时长匹配 / 逐字优先 / 按来源).
+    It made the list mean three different things depending on a setting the
+    user had usually forgotten about, so the order is now fixed:
 
-    With no uploaded audio there is nothing to match against, so `duration`
-    degrades to `char` — same rule as the settings page describes.
+      1. hits that are both per-character *and* within 2 s of the uploaded
+         audio — the ones that will actually line up,
+      2. everybody else,
+      each group by duration ascending (missing duration last).
+
+    Without an upload there is nothing to match against, so grouping falls
+    back to "per-character first" and the durations still sort the groups.
     """
-    if mode not in SORT_MODES:
-        mode = "duration"
-    if mode == "duration" and audio_duration <= 0:
-        mode = "char"
 
     def distance(r: dict) -> float:
         if audio_duration <= 0:
             return 0.0
         return abs(float(r.get("duration") or 0) - audio_duration)
 
-    def char_rank(r: dict) -> int:
-        return 0 if r.get("kind") == "char" else 1
+    def is_char(r: dict) -> bool:
+        return r.get("kind") == "char"
 
-    if mode == "char":
-        key = lambda r: (char_rank(r), distance(r))  # noqa: E731
-    elif mode == "source":
-        key = lambda r: (SOURCE_ORDER.get(r.get("source", ""), 9), distance(r))  # noqa: E731
-    else:
-        key = lambda r: (distance(r), char_rank(r))  # noqa: E731
+    def duration(r: dict) -> float:
+        try:
+            value = float(r.get("duration") or 0)
+        except (TypeError, ValueError):
+            return float("inf")
+        return value if value > 0 else float("inf")
 
-    ordered = sorted(results, key=key)
+    def rank(r: dict) -> int:
+        if audio_duration <= 0:
+            return 0 if is_char(r) else 1
+        return 0 if (is_char(r) and distance(r) <= 2.0) else 1
+
+    ordered = sorted(results, key=lambda r: (rank(r), duration(r)))
     for r in ordered:
         r["duration_match"] = bool(audio_duration > 0 and distance(r) <= 2.0)
     return ordered

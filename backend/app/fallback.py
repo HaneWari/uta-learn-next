@@ -28,7 +28,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import tempfile
 import unicodedata
 import wave
@@ -84,7 +83,7 @@ def to_wav(src: str | Path, dst: str | Path | None = None) -> Path:
     dst = Path(dst)
     cmd = [binaries.ffmpeg(), "-y", "-v", "error", "-i", str(src),
            "-ac", "1", "-ar", "16000", "-acodec", "pcm_s16le", str(dst)]
-    subprocess.run(cmd, check=True, capture_output=True)
+    binaries.run(cmd, check=True, capture_output=True)
     return dst
 
 
@@ -106,7 +105,7 @@ def to_wav_window(src: str | Path, start: float, end: float) -> Path:
            "-ss", f"{max(0.0, start):.3f}", "-t", f"{max(0.1, end - start):.3f}",
            "-i", str(src), "-ac", "1", "-ar", "16000",
            "-acodec", "pcm_s16le", str(dst)]
-    subprocess.run(cmd, check=True, capture_output=True)
+    binaries.run(cmd, check=True, capture_output=True)
     return dst
 
 

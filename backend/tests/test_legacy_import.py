@@ -25,6 +25,12 @@ def make_install(root, songs=("song-a", "song-b"), packs=True):
     return root
 
 
+@pytest.fixture(autouse=True)
+def no_real_drives(monkeypatch):
+    """Drive-root scanning is for real users; tests must not see real installs."""
+    monkeypatch.setattr(legacy_import, "_fixed_drives", lambda: [])
+
+
 @pytest.fixture
 def workspace(tmp_path, monkeypatch):
     app = tmp_path / "UtaLearnNext"
@@ -52,9 +58,39 @@ class TestScan:
         (empty / "localdata" / "not-a-song").mkdir(parents=True)
         assert legacy_import.candidates() == []
 
+    def test_finds_a_renamed_duplicate_folder(self, workspace):
+        """Windows appends " (1)" when the user unzips a second copy."""
+        make_install(workspace.parent / "UtaLearnNext-1.2.0 (1)" / "UtaLearnNext")
+        found = legacy_import.candidates()
+        assert len(found) == 1
+        assert found[0]["songs"] == 2
+
+    def test_finds_an_install_one_level_above(self, workspace):
+        outer = workspace.parent / "old-root"
+        outer.mkdir()
+        make_install(outer / "UtaLearnNext-1.3.0")
+        import shutil
+        shutil.move(str(workspace), str(outer / "UtaLearnNext"))
+        legacy_import.APP_ROOT = outer / "UtaLearnNext"
+        legacy_import.DATA_DIR = outer / "UtaLearnNext" / "localdata"
+        found = legacy_import.candidates()
+        assert [f["path"] for f in found] == [str(outer / "UtaLearnNext-1.3.0")]
+
     def test_lists_song_names_for_the_prompt(self, workspace):
         make_install(workspace.parent / "old")
         assert legacy_import.candidates()[0]["song_names"] == ["song-a", "song-b"]
+
+    def test_nested_labels_include_the_version_folder(self, workspace):
+        """Four entries all read "UtaLearnNext" before; the wrapper identifies them."""
+        make_install(workspace.parent / "UtaLearnNext-1.3.0" / "UtaLearnNext")
+        assert legacy_import.candidates()[0]["label"] == "UtaLearnNext-1.3.0 / UtaLearnNext"
+
+    def test_version_falls_back_to_the_folder_name(self, workspace):
+        """v1.2/v1.3 packs shipped no version.py, so the folder is the only clue."""
+        old = workspace.parent / "UtaLearnNext-1.3.0" / "UtaLearnNext"
+        make_install(old)
+        (old / "backend" / "app" / "version.py").unlink()
+        assert legacy_import.candidates()[0]["version"] == "1.3.0"
 
 
 class TestImport:

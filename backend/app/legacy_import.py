@@ -15,6 +15,8 @@ Safety rules:
 from __future__ import annotations
 
 import json
+import os
+import re
 import shutil
 from pathlib import Path
 
@@ -40,56 +42,180 @@ def _packs_in(folder: Path) -> dict[str, int]:
     return out
 
 
+def _scan_roots(entry: Path, deep: bool = True) -> list[Path]:
+    """Every place inside one folder that may hold an install.
+
+    Users unzip a version pack in all sorts of shapes:
+
+        <dir>/UtaLearnNext/                 (v2's own layout)
+        <dir>/UtaLearnNext-1.3.0/UtaLearnNext/
+        <dir>/UtaLearnNext/localdata/       (data next to desktop.py)
+        <dir>/localdata/                    (unzipped without the wrapper)
+        <dir>/UtaLearnNext (1)/             (Windows renamed a duplicate)
+
+    Earlier this only looked one level down and only for a literal
+    `UtaLearnNext`, so a renamed folder or a pack whose root was the version
+    directory silently produced zero candidates.
+    """
+    roots = [entry]
+    if not deep:
+        # Outer directories are only inspected for folders that are *named*
+        # like the app. Recursing into every folder of a drive (or of a temp
+        # tree) would drag in unrelated copies and slow the scan down.
+        if not entry.name.lower().startswith(("utalearn", "uta learn")):
+            return roots
+    try:
+        children = [p for p in entry.iterdir() if p.is_dir()]
+    except OSError:
+        children = []
+    for child in children:
+        name = child.name.lower()
+        # a nested app folder, or a version directory; `(1)` suffixes come from
+        # extracting a second copy into the same parent
+        if name.startswith("utalearn") or name.startswith("uta learn") \
+                or (child / "localdata").is_dir():
+            roots.append(child)
+    # and the app folder inside a version directory
+    for child in list(roots):
+        for grand in child.glob("*"):
+            if grand.is_dir() and grand.name.lower().startswith(("utalearn", "uta learn")):
+                roots.append(grand)
+    return roots
+
+
+def _candidate(root: Path, origin: Path) -> dict | None:
+    data = root / "localdata"
+    if not data.is_dir():
+        return None
+    try:
+        dirs = [d for d in data.iterdir() if d.is_dir()]
+    except OSError:
+        return None
+    songs = [d for d in dirs if _is_dataset(d)]
+    if not songs:
+        return None
+    # Nested installs are almost always named `UtaLearnNext`, so the bare
+    # folder name made the list read "UtaLearnNext ×4". The wrapper folder
+    # (`UtaLearnNext-1.3.0`, `UtaLearnNext (1)`) is what tells them apart.
+    label = root.name
+    if root != origin:
+        label = f"{origin.name} / {root.name}"
+    return {
+        "path": str(root),
+        "label": label,
+        "songs": len(songs),
+        "song_names": [d.name for d in songs][:12],
+        "packs": _packs_in(root),
+        "version": _guess_version(root),
+    }
+
+
 def candidates() -> list[dict]:
-    """Sibling folders that look like an older install."""
-    found = []
-    parent = APP_ROOT.parent
-    if not parent.is_dir():
-        return found
-    for entry in sorted(parent.iterdir()):
-        if not entry.is_dir():
+    """Folders that look like an older install, near this one.
+
+    The search runs over the app's parent directory (the usual case: the user
+    unzips v2 next to v1.x) and, when that yields nothing, over the parent's
+    parent. Both the app folder itself and any wrapper/version folder inside
+    are considered, so renamed copies and nested packs are still found.
+    """
+    found: list[dict] = []
+    seen: set[Path] = set()
+    here = APP_ROOT.resolve()
+    bases = [APP_ROOT.parent, APP_ROOT.parent.parent]
+    # A portable install often lives somewhere deep (`E:\agent-space\…`) while
+    # the old one was unzipped straight onto another drive's root
+    # (`D:\UtaLearnNext-1.3.0`). Listing a drive's top level is cheap, so every
+    # fixed drive gets the same shallow look — otherwise the feature silently
+    # found nothing for anyone whose old copy lived on a different disk.
+    drives = _fixed_drives()
+    bases.extend(drives)
+    for base in bases:
+        if not base.is_dir():
             continue
-        # the app folder may be `<parent>/UtaLearnNext` or the older
-        # `<parent>/UtaLearnNext-1.3.0/UtaLearnNext`
-        roots = [entry]
-        nested = entry / "UtaLearnNext"
-        if nested.is_dir():
-            roots.append(nested)
-        for root in roots:
-            if root.resolve() == APP_ROOT.resolve():
+        for entry in sorted(base.iterdir()):
+            if not entry.is_dir():
                 continue
-            data = root / "localdata"
-            if not data.is_dir():
+            # at a drive root, only folders that are named like the app: walking
+            # one level into every folder of a whole drive would take seconds
+            if base in drives and not entry.name.lower().startswith(
+                    ("utalearn", "uta learn")):
                 continue
-            songs = [d for d in data.iterdir() if d.is_dir() and _is_dataset(d)]
-            if not songs:
-                continue
-            found.append({
-                "path": str(root),
-                "label": root.name,
-                "songs": len(songs),
-                "song_names": [d.name for d in songs][:12],
-                "packs": _packs_in(root),
-                "version": _guess_version(root),
-            })
+            deep = base == APP_ROOT.parent
+            for root in _scan_roots(entry, deep=deep):
+                try:
+                    resolved = root.resolve()
+                except OSError:
+                    continue
+                if resolved == here or resolved in seen:
+                    continue
+                item = _candidate(root, entry)
+                if not item:
+                    continue
+                seen.add(resolved)
+                found.append(item)
+        # keep going: the drive root may hold an older copy even after a parent
+        # folder produced something (e.g. a half-deleted duplicate)
     return found
 
 
+def _fixed_drives() -> list[Path]:
+    """Top-level folders of every local fixed disk (Windows) or `/` + $HOME."""
+    if os.name != "nt":
+        return [Path("/"), Path.home()]
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        mask = kernel32.GetLogicalDrives()
+        out: list[Path] = []
+        for i in range(26):
+            if not mask & (1 << i):
+                continue
+            root = Path(f"{chr(65 + i)}:\\")
+            # DRIVE_FIXED = 3: skip USB sticks and optical drives, whose top
+            # level can block for seconds when the media is absent
+            if kernel32.GetDriveTypeW(str(root)) != 3:
+                continue
+            out.append(root)
+        return out
+    except Exception:  # noqa: BLE001
+        return [Path(APP_ROOT.resolve().anchor)]
+
+
 def _guess_version(root: Path) -> str:
-    for rel in ("backend/app/version.py", "BUILD_INFO.json"):
+    """Version of a candidate install, or "" when it cannot be known.
+
+    v2 builds carry `BUILD_INFO.json` and a `backend/app/version.py`; the v1.2 /
+    v1.3 packs shipped neither (their version only existed in the folder name
+    the user unzipped to). Reading the folder name is therefore a required
+    fallback, not a nice-to-have — without it every v1 entry showed no version.
+    """
+    for rel in ("BUILD_INFO.json", "backend/app/version.py"):
         path = root / rel
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
         if rel.endswith(".json"):
             try:
-                return str(json.loads(text).get("version") or "")
+                found = str(json.loads(text).get("version") or "")
             except ValueError:
-                continue
+                found = ""
+            if found:
+                return _clean(found)
+            continue
         for line in text.splitlines():
             if line.startswith("APP_VERSION"):
-                return line.split("=", 1)[1].strip().strip('"\'')
+                return _clean(line.split("=", 1)[1].strip().strip('"\''))
+    # the wrapper folder, then the app folder itself
+    for name in (root.parent.name, root.name):
+        m = re.search(r"\bv?(\d+\.\d+(?:\.\d+)?)\b", name)
+        if m:
+            return m.group(1)
     return ""
+
+
+def _clean(value: str) -> str:
+    return re.sub(r"[^0-9.]", "", value).strip(".")
 
 
 def import_from(source: str, move: bool = False) -> dict:
