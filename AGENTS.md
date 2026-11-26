@@ -132,12 +132,19 @@ cd frontend && npx eslint src && npx tsc --noEmit && npm test && npm run build
 
 ## Git
 
+- **Branch model** — `dev` is the working branch; `main` only receives merges that
+  are ready to ship. Develop, test and commit on `dev`; merge into `main` when a
+  version is verified. `main` currently sits at the v1.3.0 release (`95c3e73`) and
+  intentionally does *not* contain the v2 work.
+- **Remotes** — only `origin` -> `HaneWari/uta-learn-next`. The upstream project
+  (`rafaelanobre/utalearn`) is no longer tracked; don't re-add it.
 - **Commits** — Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, etc.),
   English subject, optional scope (`cards`, `export`, `sources`, `ui`). Body explains
   the *why* when it isn't obvious.
-- **Pushing** — remote is `origin` -> `HaneWari/uta-learn-next` (GitHub). Push only
-  when the task calls for it or the user asks.
-- **Don't rewrite** published history.
+- **Pushing** — push `dev` for work in progress. Push `main` only as part of a
+  deliberate release merge. Push only when the task calls for it or the user asks.
+- **Don't rewrite** published history — except the one deliberate reset that moved
+  `main` back to the v1.3.0 release.
 
 ## Testing
 
