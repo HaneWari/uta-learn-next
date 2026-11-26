@@ -38,7 +38,7 @@ class TestDecide:
         base = {
             "version": "2.0.1",
             "runtime_id": "abc",
-            "patch": {"name": "UtaLearnNext-2.0.1-patch.zip", "sha256": "00"},
+            "patch": {"name": "auto-update-patch.zip", "sha256": "00"},
             "full": {"name": "UtaLearnNext-2.0.1.zip", "sha256": "11"},
         }
         base.update(kw)
@@ -49,13 +49,13 @@ class TestDecide:
         assert d["available"] is True
         assert d["kind"] == "patch"
         assert d["runtime_changed"] is False
-        assert d["asset"]["name"].endswith("-patch.zip")
+        assert d["asset"]["name"] == "auto-update-patch.zip"
 
     def test_a_changed_runtime_offers_the_full_package(self):
         d = updater.decide(self.manifest(), runtime_id="different")
         assert d["kind"] == "full"
         assert d["runtime_changed"] is True
-        assert not d["asset"]["name"].endswith("-patch.zip")
+        assert d["asset"]["name"] != "auto-update-patch.zip"
 
     def test_the_same_version_is_not_available(self):
         d = updater.decide(self.manifest(version="2.0.0"), runtime_id="abc")
@@ -69,6 +69,11 @@ class TestDecide:
     def test_the_asset_carries_the_target_version(self):
         d = updater.decide(self.manifest(), runtime_id="abc")
         assert d["asset"]["version"] == "2.0.1"
+
+    def test_the_manifest_asset_name_is_stable(self):
+        # `releases/latest/download/<asset>` only resolves while every release
+        # publishes the same name, so this is a contract, not a preference.
+        assert updater.MANIFEST_ASSET == "update.json"
 
 
 def make_patch(path, members):

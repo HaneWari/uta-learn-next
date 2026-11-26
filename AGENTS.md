@@ -21,11 +21,14 @@ learning app (FastAPI backend + React/Vite frontend, packaged as a no-install po
   (segments, word timings, vocab overrides, `meta.view`). Schema v2: every file carries
   `schema_version` and `revision`; all writes go through `app/repo.py`.
   `localdata/` and `exports/` are gitignored.
-- **Build** — `tools/build_portable.py` emits the portable zip, `latest.json` (the
-  update manifest the app reads — never a human download) and `SHA256SUMS.txt`. A
-  patch is only built when `--patch-from <version>` says an older build can install
-  it: the release that first ships the updater has nothing to patch *from*, so it
-  must not carry a patch asset. The build prunes pip/setuptools/onnxruntime, ships
+- **Build** — `tools/build_portable.py` emits the portable zip and `update.json` (the
+  update manifest the app reads — never a human download; the name is fixed because
+  the updater fetches `releases/latest/download/update.json`). A patch is only built
+  when `--patch-from <version>` says an older build can install it: the release that
+  first ships the updater has nothing to patch *from*, so it must not carry a patch
+  asset. Whenever one is built it is named `auto-update-patch.zip` — no version
+  prefix, same URL shape for every release. The build prunes
+  pip/setuptools/onnxruntime, ships
   **only** `ffmpeg.exe` (duration comes from `binaries.probe_duration`, no ffprobe),
   re-quantises the whisper pack to int8 (~461 → 237 MB) and drops Playwright's
   `chrome-headless-shell` from the Chromium pack (~333 → 209 MB).

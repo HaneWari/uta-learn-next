@@ -27,10 +27,10 @@ from app.sources import resolve_proxy
 from app.version import APP_VERSION
 
 REPO = "HaneWari/uta-learn-next"
-# The manifest is read by the app, never by a human: it is named so it cannot
-# be mistaken for something to download by hand. `latest.json` also sorts away
-# from the archives, so the release page leads with the packages a user wants.
-MANIFEST_ASSET = "latest.json"
+# Fixed asset names: the update URL is built as
+# `releases/latest/download/<asset>`, so the manifest has to keep the same
+# name for every release. A versioned name would break that redirect.
+MANIFEST_ASSET = "update.json"
 STAGING = APP_ROOT / "_update"
 BACKUP = APP_ROOT / "app.prev"
 # `state.json` lives inside STAGING; computed at call time so a test (or a
@@ -68,7 +68,7 @@ def is_newer(candidate: str, current: str = APP_VERSION) -> bool:
 
 
 def fetch_manifest(timeout: float = 10.0) -> dict:
-    """The newest release's `latest.json` (the only file this reads).
+    """The newest release's `update.json` (the only file this reads).
 
     A release published before the updater existed has no manifest. That is
     the normal state of the world until the first v2 release ships, so it is
@@ -152,6 +152,7 @@ def stage_patch(zip_path: Path, progress=None) -> Path:
 
     Only `backend/` and `frontend/dist/` are taken: a patch must never be able
     to overwrite the interpreter, ffmpeg, models or the user's `localdata/`.
+    The asset is uploaded as `auto-update-patch.zip` on every release.
     """
     say = progress or (lambda _p, _m: None)
     pending = STAGING / "pending"

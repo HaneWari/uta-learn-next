@@ -602,13 +602,17 @@ def make_patch_zip(base: Path, out: Path) -> Path:
 
 def make_update_manifest(base: Path, patch: Path | None, full: Path, out: Path,
                          notes: str = "") -> Path:
-    """`latest.json`: version, runtime_id and the assets with hashes.
+    """`update.json`: version, runtime_id and the assets with hashes.
 
     `patch` is `None` for a release that no earlier build can upgrade to — the
     first release carrying the updater has nothing to patch *from*, so shipping
     a patch asset there would be a file users could download and fail to use.
     The manifest simply omits the key, and `updater.decide` falls back to the
     full package.
+
+    The name must stay `update.json`: `updater.fetch_manifest` reads it through
+    `releases/latest/download/update.json`, which only resolves while every
+    release publishes that exact asset name.
     """
     info = json.loads((base / "BUILD_INFO.json").read_text(encoding="utf-8"))
     manifest = {
@@ -634,25 +638,6 @@ def make_update_manifest(base: Path, patch: Path | None, full: Path, out: Path,
                    encoding="utf-8")
     say(f"已生成 {out.name}" + ("" if patch is not None else "(无补丁:首个带更新器的版本)"))
     return out
-
-
-def write_checksums(zip_root: Path) -> Path:
-    """`SHA256SUMS.txt` beside the release assets (§5.9/P3-3).
-
-    A user (or a mirror) can verify a download without trusting the page that
-    served it. `sha256sum -c` reads this format directly.
-    """
-    entries = []
-    for f in sorted(zip_root.glob("*")):
-        if not f.is_file() or f.name in ("SHA256SUMS.txt",):
-            continue
-        if f.suffix not in (".zip",) and f.name != "latest.json":
-            continue
-        entries.append(f"{sha256_file(f)}  {f.name}")
-    target = zip_root / "SHA256SUMS.txt"
-    target.write_text("\n".join(entries) + "\n", encoding="utf-8")
-    say(f"已生成 {target.name}({len(entries)} 项)")
-    return target
 
 
 def make_custom_lyrics_zip(out: Path) -> Path:
@@ -707,7 +692,7 @@ def main() -> int:
     ap.add_argument("--browsers-dir", default=None, help="Chromium 安装位置（默认构建目录旁）")
     ap.add_argument("--custom-pack", action="store_true",
                     help="只生成自定义歌词扩展包 whisper+翻译（版本无关，一次构建长期复用）")
-    ap.add_argument("--notes", default="", help="latest.json 里的更新说明")
+    ap.add_argument("--notes", default="", help="update.json 里的更新说明")
     ap.add_argument("--patch-from", default="",
                     help="补丁可覆盖的最旧版本,如 2.0.0;留空则不出补丁")
     ap.add_argument("--ci", action="store_true",
@@ -763,12 +748,13 @@ def main() -> int:
     # build the patch applies to (defaults to the previous minor).
     patch = None
     if args.patch_from:
-        patch = make_patch_zip(base, zip_root / f"UtaLearnNext-{VERSION}-patch.zip")
+        # Constant name so the updater can build one URL for every release;
+        # the version it leads to lives in update.json, not in the filename.
+        patch = make_patch_zip(base, zip_root / "auto-update-patch.zip")
     else:
         say("不生成补丁:这是第一个带更新器的版本(下次发版用 --patch-from)")
-    make_update_manifest(base, patch, full, zip_root / "latest.json",
+    make_update_manifest(base, patch, full, zip_root / "update.json",
                          notes=args.notes)
-    write_checksums(zip_root)
 
     if not args.no_chromium:
         bdir = Path(args.browsers_dir).resolve() if args.browsers_dir else None
