@@ -1,12 +1,15 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { CSSProperties, RefObject } from "react";
 import type { Segment, WordTiming } from "../types";
 import type { SyncState } from "../hooks/useSyncEngine";
 import { useSettings } from "../lib/settings";
 import { effectiveWords } from "../lib/words";
 import { displayRomaji } from "../lib/romaji";
-import { charState } from "../lib/charState";
 import { shownText, shownZh } from "../lib/lyricText";
+import { buildLine, sweepAt } from "../lib/karaokeSweep";
+import type { SweepGlyph, SweepWord } from "../lib/karaokeSweep";
+import { karaokePalette } from "../lib/karaokeStyle";
+import type { KaraokePalette } from "../lib/karaokeStyle";
 import type { WordHit } from "./WordPopover";
 import { RubySurface } from "./RubySurface";
 import { LineEditBox } from "./LineEditBox";
@@ -15,17 +18,24 @@ import { useLineEditor } from "./LineEditor";
 /**
  * 卡拉OK样式,按经典点歌机的三区结构排版:
  *
- *   ① 顶部黑边   —— 整句中文翻译,已唱部分亮色、未唱部分压暗;
- *   ② 中间画面区 —— 当前句歌词压在画面上,已唱的字是主题色,
- *                   未唱的字是白字 + 硬描边,注音与罗马音跟着走;
- *   ③ 底部黑边   —— 下一句预告,统一用白字,作为接句视线落点。
+ *   1 顶部黑边   —— 整句中文翻译,当前句用主题色、下一句用白色;
+ *   2 中间画面区 —— 当前句压在画面上,整行只有一条向右推进的扫字锋面;
+ *   3 底部黑边   —— 下一句预告,作为接句视线落点。
  *
- * 换句规则也照点歌机:当前句唱完才整句切换,不做滚动;翻译跟当前句同步,
- * 下一句只在底部预告位置出现。这样导出成 MV 时,上下黑边就是天然的字幕带。
- *
- * 字形拆分、逐字状态、ruby 分组全部复用默认样式的同一套函数,
- * 所以两种样式的对轴结果永远一致。
+ * 参考 karaoke-studio 的 `wipe.py` / `scanline.py`:
+ * - 已唱层不是逐字变色,而是用锋面横坐标裁出「从左到当前」的一整条带;
+ * - 字与字之间、词与词之间由锋面平滑穿过,不会一格一格跳;
+ * - 锋面上再叠一条只在字形内可见的羽化高光带。
  */
+
+const FONT_STACKS: Record<KaraokePalette["font"], string> = {
+  gothic:
+    '"Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Noto Sans JP", "Microsoft YaHei", sans-serif',
+  mincho:
+    '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", "SimSun", serif',
+  rounded:
+    '"Hiragino Maru Gothic ProN", "M PLUS Rounded 1c", "Yu Gothic", "Microsoft YaHei", sans-serif',
+};
 
 export function KaraokeStage({
   segments,
@@ -33,7 +43,7 @@ export function KaraokeStage({
   audioRef,
   clockRef,
   offset = 0,
-  color = "coral",
+  color = "red",
   showFurigana = true,
   showRomaji = true,
   showTranslation = true,
@@ -68,11 +78,11 @@ export function KaraokeStage({
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   const [settings] = useSettings();
-  const activeRef = useRef<HTMLSpanElement | null>(null);
   const pickTimerRef = useRef<number | null>(null);
   const cur = segments[syncState.displayIndex];
   const next = segments[syncState.displayIndex + 1] ?? null;
-  const lineWords = effectiveWords(cur);
+  const lineWords = useMemo(() => effectiveWords(cur), [cur]);
+  const palette = useMemo(() => karaokePalette(settings), [settings]);
   const { editing, draft, setDraft, startEdit } = useLineEditor({
     cur,
     song,
@@ -84,28 +94,6 @@ export function KaraokeStage({
       }
     },
   });
-
-  // 逐字填充:整句共用一个 --p,只让当前字从主题色扫到白色
-  const aw = syncState.activeWordIndex;
-  const ak = syncState.activeKanaIndex;
-  useEffect(() => {
-    const el = activeRef.current;
-    const audio = audioRef.current;
-    if (!cur || aw === null || ak === null) return;
-    const ch = effectiveWords(cur)[aw]?.chars?.[ak];
-    if (!el || !ch) return;
-    let raf = 0;
-    const shift = cur.line_offset ?? 0;
-    const span = Math.max(0.001, ch.end - ch.start);
-    const loop = () => {
-      const now = (audio ? audio.currentTime - offset : clockRef.current ?? 0) - shift;
-      const p = Math.min(1, Math.max(0, (now - ch.start) / span));
-      el.style.setProperty("--p", p.toFixed(3));
-      raf = requestAnimationFrame(loop);
-    };
-    loop();
-    return () => cancelAnimationFrame(raf);
-  }, [cur, syncState.activeSegmentId, aw, ak, audioRef, clockRef, offset, lineWords]);
 
   // 换句时清掉未触发的查词计时器,避免双击进编辑器后仍弹词卡
   useEffect(() => {
@@ -124,17 +112,30 @@ export function KaraokeStage({
   const zh = shownZh(cur);
   const nextZh = next ? shownZh(next) : undefined;
 
+  const theme = {
+    "--k-color": palette.after,
+    "--k-before": palette.before,
+    "--k-after": palette.after,
+    "--k-before-stroke": palette.beforeStroke,
+    "--k-after-stroke": palette.afterStroke,
+    "--k-stroke-w": `${palette.strokeWidth}px`,
+    "--k-glow": palette.glow,
+    "--k-scan": palette.scanlineColor,
+    "--k-font": FONT_STACKS[palette.font],
+  } as CSSProperties;
+
   return (
     <div
       className="karaoke-stage"
       data-color={color}
+      style={theme}
       onContextMenu={onContextMenu}
       onDoubleClick={() => {
         // 编辑框里的双击是选词,不应把正在编辑的草稿重置回原文
         if (!editing) startEdit();
       }}
     >
-      {/* ① 顶部黑边:翻译字幕带 */}
+      {/* 1 顶部黑边:翻译字幕带 */}
       <div className="karaoke-top">
         <div className="karaoke-zh-row" key={`zh-${cur.id}`}>
           <span className="karaoke-zh cur">{showTranslation ? zh ?? "" : ""}</span>
@@ -144,7 +145,7 @@ export function KaraokeStage({
         </div>
       </div>
 
-      {/* ② 中间画面区:当前句歌词压在画面下沿 */}
+      {/* 2 中间画面区:当前句歌词压在画面下沿 */}
       <div className="karaoke-screen">
         <div className="karaoke-cur" key={`k-${cur.id}`}>
           {editing ? (
@@ -161,12 +162,15 @@ export function KaraokeStage({
           ) : (
             <KaraokeLine
               segment={cur}
-              syncState={syncState}
               words={lineWords}
-              activeRef={activeRef}
+              palette={palette}
               showFurigana={showFurigana}
               showRomaji={showRomaji}
               settings={settings}
+              audioRef={audioRef}
+              clockRef={clockRef}
+              offset={offset}
+              syncState={syncState}
               onPick={pickWord}
               pickTimerRef={pickTimerRef}
             />
@@ -174,14 +178,13 @@ export function KaraokeStage({
         </div>
       </div>
 
-      {/* ③ 底部黑边:下一句白字预告 */}
+      {/* 3 底部黑边:下一句白字预告 */}
       <div className="karaoke-bottom">
         {next && !editing ? (
           <KaraokeLine
             segment={next}
-            syncState={syncState}
             words={effectiveWords(next)}
-            activeRef={null}
+            palette={palette}
             showFurigana={showFurigana}
             showRomaji={showRomaji}
             settings={settings}
@@ -196,135 +199,312 @@ export function KaraokeStage({
 }
 
 /**
- * 一整句:逐词 ruby 排版,每个字形按高亮状态着色。
+ * 一整句:三层完全相同的 ruby 排版叠在一起。
  *
- * 当前句的红/主题色字用「白描边 + 红填充」,和点歌机一样在画面上跳出来;
- * 下一句是纯白字,永远不扫色,只作为接句提示。
+ *   before —— 未唱配色,永远完整可见,也是唯一接收点击的层;
+ *   after  —— 已唱配色,按整行唯一的锋面横坐标裁切;
+ *   scan   —— 白色高光,用一条横向渐变 mask 只露出锋面附近的一小段。
+ *
+ * 三层共用同一份 DOM 尺寸,所以注音、字距和换行不会错位。
  */
 function KaraokeLine({
   segment,
-  syncState,
   words,
-  activeRef,
+  palette,
   showFurigana,
   showRomaji,
   settings,
   muted = false,
+  audioRef,
+  clockRef,
+  offset = 0,
+  syncState,
   onPick,
   pickTimerRef,
 }: {
   segment: Segment;
-  syncState: SyncState;
-  words: ReturnType<typeof effectiveWords>;
-  activeRef: RefObject<HTMLSpanElement | null> | null;
+  words: WordTiming[];
+  palette: KaraokePalette;
   showFurigana: boolean;
   showRomaji: boolean;
   settings: ReturnType<typeof useSettings>[0];
   muted?: boolean;
+  audioRef?: RefObject<HTMLAudioElement | null>;
+  clockRef?: RefObject<number>;
+  offset?: number;
+  syncState?: SyncState;
   onPick?: (word: WordTiming, e: React.MouseEvent) => void;
   pickTimerRef?: RefObject<number | null>;
 }) {
+  const { words: sweepWords, glyphs } = useMemo(
+    () => buildLine(words),
+    [words],
+  );
+  const beforeRef = useRef<HTMLDivElement | null>(null);
+  const afterRef = useRef<HTMLDivElement | null>(null);
+  const scanRef = useRef<HTMLDivElement | null>(null);
+  const rafRef = useRef(0);
   const chars = shownText(segment).replace(/\s/g, "").length || 1;
+  const hasClock = Boolean(syncState);
+
+  useEffect(() => {
+    if (muted || !audioRef || !clockRef || !hasClock) return;
+    const before = beforeRef.current;
+    const after = afterRef.current;
+    const scan = scanRef.current;
+    if (!before || !after || !scan || !glyphs.length) return;
+
+    // 字形盒子只在换行/改字号时变化,不必每一帧都量。
+    let boxes: { left: number; right: number; height: number }[] = [];
+    const measure = () => {
+      const root = before.getBoundingClientRect();
+      // 描边宽度以 1080p 字幕为基准:字号变大(4K 导出 / 大屏)时同比放大,
+      // 否则 4K 下 2px 描边会细得几乎看不见。
+      const fontPx = parseFloat(getComputedStyle(before).fontSize) || 108;
+      before.parentElement?.style.setProperty(
+        "--k-scale",
+        (fontPx / 108).toFixed(3),
+      );
+      boxes = Array.from(
+        before.querySelectorAll<HTMLElement>("[data-gi]"),
+      ).map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          left: r.left - root.left,
+          right: r.right - root.left,
+          height: r.height,
+        };
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(before);
+    void document.fonts?.ready.then(measure);
+
+    const shift = segment.line_offset ?? 0;
+    const loop = () => {
+      const audio = audioRef.current;
+      const now =
+        (audio && isFinite(audio.duration) && audio.duration > 0
+          ? audio.currentTime - offset
+          : clockRef.current ?? 0) - shift;
+      const pos = sweepAt(glyphs, now);
+      const first = boxes[0];
+      const last = boxes[boxes.length - 1];
+      if (!first || !last) {
+        rafRef.current = requestAnimationFrame(loop);
+        return;
+      }
+
+      let x = first.left;
+      if (pos.gap) {
+        const a = boxes[pos.index] ?? first;
+        const b = boxes[pos.index + 1] ?? last;
+        x = a.right + (b.left - a.right) * pos.frac;
+      } else {
+        const box = boxes[pos.index] ?? first;
+        x = box.left + (box.right - box.left) * pos.frac;
+      }
+      if (now >= glyphs[glyphs.length - 1].end) x = last.right;
+      if (now <= glyphs[0].start) x = first.left;
+
+      const width = before.clientWidth;
+      const right = Math.max(0, width - x);
+      after.style.clipPath = `inset(0 ${right.toFixed(2)}px 0 0)`;
+
+      // 只在锋面真正移动时显示高光带;唱完或还没开始时让它消失。
+      const moving =
+        now >= glyphs[0].start && now < glyphs[glyphs.length - 1].end;
+      if (!moving || !palette.scanline) {
+        scan.style.opacity = "0";
+      } else {
+        const scale = Math.max(0.45, Math.min(2.4, (first.height || 96) / 108));
+        const half = (palette.scanlineWidth * scale) / 2;
+        const feather = Math.min(half * 0.75, 8 * scale);
+        scan.style.opacity = "1";
+        scan.style.setProperty("--sweep-l", `${(x - half).toFixed(2)}px`);
+        scan.style.setProperty(
+          "--sweep-li",
+          `${(x - half + feather).toFixed(2)}px`,
+        );
+        scan.style.setProperty(
+          "--sweep-ri",
+          `${(x + half - feather).toFixed(2)}px`,
+        );
+        scan.style.setProperty("--sweep-r", `${(x + half).toFixed(2)}px`);
+      }
+      rafRef.current = requestAnimationFrame(loop);
+    };
+    loop();
+    return () => {
+      cancelAnimationFrame(rafRef.current);
+      ro.disconnect();
+    };
+  }, [
+    segment.id,
+    segment.line_offset,
+    glyphs,
+    muted,
+    audioRef,
+    clockRef,
+    offset,
+    palette.scanline,
+    palette.scanlineWidth,
+    hasClock,
+  ]);
+
+  const pick = (word: WordTiming, e: React.MouseEvent) => {
+    if (!onPick) return;
+    e.stopPropagation();
+    if (pickTimerRef?.current) window.clearTimeout(pickTimerRef.current);
+    const { clientX, clientY } = e;
+    const timer = window.setTimeout(() => {
+      if (pickTimerRef) pickTimerRef.current = null;
+      onPick(word, { clientX, clientY } as React.MouseEvent);
+    }, 240);
+    if (pickTimerRef) pickTimerRef.current = timer;
+  };
+
+  if (muted) {
+    return (
+      <div
+        className="karaoke-line muted"
+        style={{ "--chars": chars } as CSSProperties}
+      >
+        <SweepLayer
+          words={sweepWords}
+          glyphs={glyphs}
+          wordTimes={words}
+          showFurigana={showFurigana}
+          muted
+        />
+        {showRomaji && (
+          <RomajiRow words={words} settings={settings} chars={chars} muted />
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div
-      className={`karaoke-line${muted ? " muted" : ""}`}
-      style={{ "--chars": chars } as CSSProperties}
-    >
-      <div className="karaoke-text-row">
-        {words.map((w, i) => (
-          <WordRow
-            key={i}
-            word={w}
-            segment={segment}
-            wordIndex={i}
-            syncState={syncState}
-            activeRef={activeRef}
+    <div className="karaoke-line" style={{ "--chars": chars } as CSSProperties}>
+      <div className="karaoke-sweep">
+        <div className="karaoke-layer before" ref={beforeRef}>
+          <SweepLayer
+            words={sweepWords}
+            glyphs={glyphs}
+            wordTimes={words}
             showFurigana={showFurigana}
-            muted={muted}
-            onPick={onPick}
-            pickTimerRef={pickTimerRef}
+            onPick={pick}
           />
-        ))}
+        </div>
+        <div className="karaoke-layer after" ref={afterRef} aria-hidden>
+          <SweepLayer
+            words={sweepWords}
+            glyphs={glyphs}
+            wordTimes={words}
+            showFurigana={showFurigana}
+          />
+        </div>
+        <div className="karaoke-layer scan" ref={scanRef} aria-hidden>
+          <SweepLayer
+            words={sweepWords}
+            glyphs={glyphs}
+            wordTimes={words}
+            showFurigana={showFurigana}
+          />
+        </div>
       </div>
       {showRomaji && (
-        <div
-          className="karaoke-romaji-row"
-          style={{ "--chars": chars } as CSSProperties}
-        >
-          {words.map((w, i) => (
-            <span className="kroma-word" key={`m-${i}`}>
-              <RubySurface
-                word={w}
-                showFurigana={false}
-                renderChar={(ch) => <span className="kch ghost">{ch}</span>}
-              />
-              <span className="kroma">{displayRomaji(w, settings)}</span>
-            </span>
-          ))}
-        </div>
+        <RomajiRow words={words} settings={settings} chars={chars} />
       )}
     </div>
   );
 }
 
-function WordRow({
-  word,
-  segment,
-  wordIndex,
-  syncState,
-  activeRef,
+function SweepLayer({
+  words,
+  glyphs,
+  wordTimes,
   showFurigana,
-  muted,
+  muted = false,
   onPick,
-  pickTimerRef,
 }: {
-  word: WordTiming;
-  segment: Segment;
-  wordIndex: number;
-  syncState: SyncState;
-  activeRef: RefObject<HTMLSpanElement | null> | null;
+  words: SweepWord[];
+  glyphs: SweepGlyph[];
+  wordTimes: WordTiming[];
   showFurigana: boolean;
   muted?: boolean;
   onPick?: (word: WordTiming, e: React.MouseEvent) => void;
-  pickTimerRef?: RefObject<number | null>;
 }) {
-  const pick = onPick
-    ? (e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (pickTimerRef?.current) window.clearTimeout(pickTimerRef.current);
-        const { clientX, clientY } = e;
-        const timer = window.setTimeout(() => {
-          if (pickTimerRef) pickTimerRef.current = null;
-          onPick(word, { clientX, clientY } as React.MouseEvent);
-        }, 240);
-        if (pickTimerRef) pickTimerRef.current = timer;
-      }
-    : undefined;
-
   return (
-    <span className={`kword${muted ? " muted" : ""}`} onClick={pick}>
-      <RubySurface
-        word={word}
-        showFurigana={showFurigana && !muted}
-        renderChar={(ch, ci) => {
-          const st = muted
-            ? "upcoming"
-            : charState(syncState, segment.id, wordIndex, ci);
-          return (
-            <span
-              key={ci}
-              className={`kch ${st}`}
-              ref={!muted && st === "active" && activeRef
-                ? (el) => {
-                    activeRef.current = el;
-                  }
-                : undefined}
-            >
-              {ch}
-            </span>
-          );
-        }}
-      />
-    </span>
+    <div className="karaoke-text-row">
+      {words.map((word, wi) => (
+        <span
+          className="kword"
+          key={wi}
+          data-wi={wi}
+          onClick={
+            onPick && wordTimes[wi]
+              ? (e) => onPick(wordTimes[wi], e)
+              : undefined
+          }
+        >
+          <span className="surface">
+            {word.groups.map((group, gi) => (
+              <span className="ruby-group" key={gi}>
+                <span
+                  className={`furi${group.reading && showFurigana ? "" : " blank"}`}
+                >
+                  {group.reading && showFurigana ? group.reading : ""}
+                </span>
+                <span className="ruby-chars">
+                  {glyphs.slice(group.from, group.to).map((ch, k) => (
+                    <span
+                      className={`kch${muted ? " muted" : ""}`}
+                      key={k}
+                      data-gi={group.from + k}
+                    >
+                      {ch.ch}
+                    </span>
+                  ))}
+                </span>
+              </span>
+            ))}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RomajiRow({
+  words,
+  settings,
+  chars,
+  muted = false,
+}: {
+  words: WordTiming[];
+  settings: ReturnType<typeof useSettings>[0];
+  chars: number;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className="karaoke-romaji-row"
+      style={{ "--chars": chars } as CSSProperties}
+    >
+      {words.map((w, i) => (
+        <span className="kroma-word" key={`m-${i}`}>
+          <RubySurface
+            word={w}
+            showFurigana={false}
+            renderChar={(ch) => <span className="kch ghost">{ch}</span>}
+          />
+          <span className={`kroma${muted ? " muted" : ""}`}>
+            {displayRomaji(w, settings)}
+          </span>
+        </span>
+      ))}
+    </div>
   );
 }

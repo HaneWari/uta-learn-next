@@ -59,3 +59,40 @@ def test_display_defaults_include_the_playback_style(client):
     data = client.get("/api/settings").json()
     assert data["play_style"] == "default"
     assert data["karaoke_color"] == "red"
+
+
+def test_karaoke_style_options_are_validated(client):
+    data = client.get("/api/settings").json()
+    assert data["karaoke_scanline_enabled"] is True
+    assert data["karaoke_scanline_width"] == 16
+    assert data["karaoke_font"] == "gothic"
+
+    assert (
+        client.patch(
+            "/api/settings",
+            json={
+                "karaoke_custom_colors": True,
+                "karaoke_after_color": "#33AAFF",
+                "karaoke_font": "mincho",
+                "karaoke_stroke_width": 3,
+                "karaoke_scanline_width": 24,
+            },
+        ).status_code
+        == 200
+    )
+    saved = client.get("/api/settings").json()
+    assert saved["karaoke_after_color"] == "#33AAFF"
+    assert saved["karaoke_font"] == "mincho"
+
+    assert (
+        client.patch("/api/settings", json={"karaoke_after_color": "red"}).status_code
+        == 400
+    )
+    assert (
+        client.patch("/api/settings", json={"karaoke_font": "comic"}).status_code
+        == 400
+    )
+    assert (
+        client.patch("/api/settings", json={"karaoke_stroke_width": 12}).status_code
+        == 400
+    )

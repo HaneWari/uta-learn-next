@@ -76,6 +76,14 @@ cd frontend && npx eslint src && npx tsc --noEmit && npm test && npm run build
   `dicts.parse_reading_marks` strips the mark-up *before* tokenisation and
   `apply_reading_marks` re-writes the token `kana`/`romaji` after, so the tagger
   never sees the brackets and the per-glyph wipe survives.
+- **Karaoke sweep** — the karaoke style paints one continuous front, never a
+  per-glyph fill. `lib/karaokeSweep.buildLine` maps words to `rubyGroups` and a
+  flat glyph list; `KaraokeStage` stacks three identical layers (before / after /
+  scanline) and moves a single `clip-path` x, interpolating across gaps between
+  glyphs. The scanline mask must stay inside glyph shapes — a plain vertical
+  bar across the row reads as a bug, not as karaoke. Colours and sizes come from
+  `lib/karaokeStyle.ts` (`KaraokeColorState`-style before/after text + stroke),
+  scaled off a 1080p baseline so 4K exports keep the same weight.
 - **Romaji has two readings** — `enrich` stores `kana`/`kana_literal` and
   `romaji`/`romaji_literal`; particles differ (は → `ha` literal, `wa` sung). The
   browser picks one per setting (`lib/romaji.ts`). Never bake a single form in.

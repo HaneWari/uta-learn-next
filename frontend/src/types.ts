@@ -208,6 +208,23 @@ export interface AppSettings {
   play_style: "default" | "karaoke";
   /** 卡拉OK样式的字幕主色;red 是点歌机的经典红 */
   karaoke_color: "red" | "coral" | "blue" | "green";
+  /** 用自定义两只颜色替代主题预设 */
+  karaoke_custom_colors: boolean;
+  /** 走字前 / 走字后的文字与描边颜色(仅在自定义模式下生效) */
+  karaoke_before_color: string;
+  karaoke_after_color: string;
+  karaoke_before_stroke_color: string;
+  karaoke_after_stroke_color: string;
+  /** 描边宽度,以 1080p 为基准 */
+  karaoke_stroke_width: number;
+  /** 走字后的外发光 */
+  karaoke_glow: boolean;
+  /** 扫字锋面的高光带 */
+  karaoke_scanline_enabled: boolean;
+  karaoke_scanline_color: string;
+  karaoke_scanline_width: number;
+  /** 字幕字体族 */
+  karaoke_font: "gothic" | "mincho" | "rounded";
   default_layers: {
     furigana: boolean;
     romaji: boolean;

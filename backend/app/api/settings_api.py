@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import socket
 import time
 
@@ -52,6 +53,24 @@ def api_settings_patch(patch: SettingsPatch):
         raise HTTPException(status_code=400, detail="播放样式无效")
     if data.get("karaoke_color") not in (None, "red", "coral", "blue", "green"):
         raise HTTPException(status_code=400, detail="卡拉OK主题色无效")
+    if data.get("karaoke_font") not in (None, "gothic", "mincho", "rounded"):
+        raise HTTPException(status_code=400, detail="卡拉OK字体无效")
+    for key in (
+        "karaoke_before_color",
+        "karaoke_after_color",
+        "karaoke_before_stroke_color",
+        "karaoke_after_stroke_color",
+        "karaoke_scanline_color",
+    ):
+        value = data.get(key)
+        if value is not None and not re.fullmatch(r"#[0-9a-fA-F]{6}", str(value)):
+            raise HTTPException(status_code=400, detail=f"{key} 需为 #RRGGBB")
+    stroke = data.get("karaoke_stroke_width")
+    if stroke is not None and not 0 <= float(stroke) <= 8:
+        raise HTTPException(status_code=400, detail="描边宽度需在 0 - 8 之间")
+    scan_width = data.get("karaoke_scanline_width")
+    if scan_width is not None and not 4 <= float(scan_width) <= 48:
+        raise HTTPException(status_code=400, detail="高光带宽度需在 4 - 48 之间")
     zoom = data.get("page_zoom")
     if zoom is not None and not isinstance(zoom, (int, float)):
         raise HTTPException(status_code=400, detail="页面缩放无效")

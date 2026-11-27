@@ -479,12 +479,78 @@ body {
   align-items: center;
   width: 100%;
   max-width: 100%;
-  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo",
-    "Noto Sans JP", "Microsoft YaHei", sans-serif;
+  font-family: var(
+    --k-font,
+    "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo", "Noto Sans JP",
+    "Microsoft YaHei", sans-serif
+  );
   font-size: min(clamp(34px, 5.6vw, 108px), calc(94vw / var(--chars, 12)));
   font-weight: 800;
   line-height: 1.14;
   letter-spacing: 0.02em;
+}
+
+/* 三层完全重合:before 是底色层,after 被整行锋面裁剪,scan 只露高光带 */
+.karaoke-sweep {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+  isolation: isolate;
+}
+
+.karaoke-layer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.karaoke-layer.before {
+  position: relative;
+  pointer-events: auto;
+}
+
+.karaoke-layer.after {
+  clip-path: inset(0 100% 0 0);
+  will-change: clip-path;
+}
+
+.karaoke-layer.scan {
+  opacity: 0;
+  /* 高光带用一条横向透明→实色→透明的 mask;字形本身提供剪影,所以不会
+     在字间空白处画出一条竖线。 */
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    transparent var(--sweep-l, 0),
+    #000 var(--sweep-li, 0),
+    #000 var(--sweep-ri, 0),
+    transparent var(--sweep-r, 0),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    transparent var(--sweep-l, 0),
+    #000 var(--sweep-li, 0),
+    #000 var(--sweep-ri, 0),
+    transparent var(--sweep-r, 0),
+    transparent 100%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  will-change: opacity, mask-image;
+}
+
+/* 锋面处的字被提亮成高光色;未唱层本来偏白,所以视觉上只在已经变红的字上出现 */
+.karaoke-layer.scan .kch {
+  color: var(--k-scan, #fff);
+  -webkit-text-stroke: calc(var(--k-stroke-w, 2px) * var(--k-scale, 1))
+    var(--k-scan, #fff);
+  text-shadow:
+    0 0 14px var(--k-scan, #fff),
+    0 0 28px var(--k-glow, transparent);
 }
 
 .karaoke-text-row {
@@ -537,47 +603,46 @@ body {
   font-size: 0.32em;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: #fff;
+  color: var(--k-before, #fff);
   overflow: hidden;
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.95));
+}
+
+.karaoke-layer.after .furi {
+  color: var(--k-after, #ff2020);
+}
+
+.karaoke-layer.scan .furi {
+  color: var(--k-scan, #fff);
 }
 
 /* 未唱的字:白字 + 黑色硬描边,落在任何画面上都能读 */
 .kch {
   display: inline-block;
   white-space: pre;
-  color: #fff;
-  -webkit-text-stroke: 2px #000;
+  color: var(--k-before, #fff);
+  -webkit-text-stroke: calc(var(--k-stroke-w, 2px) * var(--k-scale, 1))
+    var(--k-before-stroke, #000);
   paint-order: stroke fill;
   text-shadow: 0 3px 6px rgba(0, 0, 0, 0.85);
 }
 
-/* 已唱完的字:主题色填充、白色描边 —— 点歌机的经典「红字白边」 */
-.kch.sung {
-  color: var(--k-color);
-  -webkit-text-stroke: 2px #fff;
+/* 已唱层:整层都是走字后的配色,由锋面裁出「已唱」区域 */
+.karaoke-layer.after .kch {
+  color: var(--k-after, #ff2020);
+  -webkit-text-stroke: calc(var(--k-stroke-w, 2px) * var(--k-scale, 1))
+    var(--k-after-stroke, #fff);
   text-shadow:
-    0 0 10px var(--k-glow),
+    0 0 12px var(--k-glow, transparent),
     0 3px 6px rgba(0, 0, 0, 0.85);
 }
 
-/* 正在唱的字:左半已唱、右半未唱,扫过时从白变主题色 */
-.kch.active {
-  color: transparent;
-  background-image: linear-gradient(
-    90deg,
-    var(--k-color) 0%,
-    var(--k-color) calc(var(--p, 0) * 100%),
-    #fff calc(var(--p, 0) * 100%),
-    #fff 100%
-  );
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-stroke: 2px #fff;
-  paint-order: stroke fill;
-  text-shadow:
-    0 0 12px var(--k-glow),
-    0 3px 6px rgba(0, 0, 0, 0.85);
+.karaoke-text-row .kch {
+  font-family: inherit;
+}
+
+.karaoke-layer.before .kch {
+  text-shadow: 0 3px 6px rgba(0, 0, 0, 0.85);
 }
 
 .kch.ghost {
@@ -628,13 +693,18 @@ body {
 }
 
 .karaoke-bottom .karaoke-line .furi {
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--k-before, rgba(255, 255, 255, 0.85));
 }
 
 .karaoke-bottom .karaoke-line .kch {
   color: #fff;
   -webkit-text-stroke: 1.5px #000;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.karaoke-bottom .karaoke-layer.after,
+.karaoke-bottom .karaoke-layer.scan {
+  display: none;
 }
 
 .karaoke-bottom .karaoke-romaji-row {
@@ -4383,6 +4453,34 @@ html[data-theme="dark"] .modetoggle.on {
 
 .setinput {
   min-width: 240px;
+}
+
+.karaoke-number {
+  min-width: 96px;
+  width: 96px;
+}
+
+.color-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setcolor {
+  width: 34px;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid rgba(178, 146, 116, 0.42);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  cursor: pointer;
+}
+
+.color-hex {
+  min-width: 108px;
+  width: 108px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  text-transform: uppercase;
 }
 
 .segmented {

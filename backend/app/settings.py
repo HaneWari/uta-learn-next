@@ -35,6 +35,17 @@ DEFAULTS: dict[str, Any] = {
     "page_zoom": 1.0,                # 0.8 - 1.5 : 整页缩放
     "play_style": "default",         # default | karaoke : 播放页样式
     "karaoke_color": "red",          # red | coral | blue | green : 卡拉OK字幕主色
+    "karaoke_custom_colors": False,  # 用下面的两只颜色替代主题预设
+    "karaoke_before_color": "#FFFFFF",
+    "karaoke_after_color": "#FF2020",
+    "karaoke_before_stroke_color": "#000000",
+    "karaoke_after_stroke_color": "#FFFFFF",
+    "karaoke_stroke_width": 2,       # 1080p 基准的描边宽度
+    "karaoke_glow": True,            # 走字后的外发光
+    "karaoke_scanline_enabled": True,
+    "karaoke_scanline_color": "#FFFFFF",
+    "karaoke_scanline_width": 16,    # 1080p 基准的高光带宽
+    "karaoke_font": "gothic",        # gothic | mincho | rounded
     "default_layers": {
         "furigana": True,
         "romaji": True,

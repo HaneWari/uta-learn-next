@@ -184,6 +184,67 @@ function ZoomField({
   );
 }
 
+/** 颜色设置:浏览器取色器 + 十六进制文本,两边保持同步。 */
+function ColorRow({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  // 颜色输入必须用本地草稿:直接受控到已保存值会让用户无法删掉一个字符
+  // 重新输入(#FFFFFF → #F 时校验失败、值被弹回)。
+  const [draft, setDraft] = useState(value);
+  const [seen, setSeen] = useState(value);
+  // 外部(取色器/另一处设置)改了值时同步草稿。渲染期调整状态是 React
+  // 官方推荐的“props 变化时重置 state”写法,不会像 effect 那样多跑一轮。
+  if (value !== seen) {
+    setSeen(value);
+    setDraft(value);
+  }
+
+  const commit = () => {
+    const v = draft.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      onChange(v.toUpperCase());
+    } else {
+      setDraft(value);
+    }
+  };
+
+  return (
+    <div className="setrow">
+      <span className="setlabel">{label}</span>
+      <span className="color-field">
+        <input
+          type="color"
+          className="setcolor"
+          value={value}
+          aria-label={label}
+          onChange={(e) => onChange(e.target.value.toUpperCase())}
+        />
+        <input
+          className="setinput color-hex"
+          value={draft}
+          spellCheck={false}
+          aria-label={`${label}十六进制值`}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+              e.currentTarget.blur();
+            }
+          }}
+        />
+      </span>
+    </div>
+  );
+}
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [settings, update] = useSettings();
   const [group, setGroup] = useState<Group>("general");
@@ -539,6 +600,106 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         { value: "green", label: "绿色" },
                       ]}
                       onChange={(v) => update({ karaoke_color: v })}
+                    />
+                    <Toggle
+                      label="自定义走字配色"
+                      hint="分别设置走字前、走字后的文字色与描边色"
+                      on={settings.karaoke_custom_colors}
+                      onChange={(v) => update({ karaoke_custom_colors: v })}
+                    />
+                    {settings.karaoke_custom_colors && (
+                      <>
+                        <ColorRow
+                          label="走字前文字"
+                          value={settings.karaoke_before_color}
+                          onChange={(v) => update({ karaoke_before_color: v })}
+                        />
+                        <ColorRow
+                          label="走字后文字"
+                          value={settings.karaoke_after_color}
+                          onChange={(v) => update({ karaoke_after_color: v })}
+                        />
+                        <ColorRow
+                          label="走字前描边"
+                          value={settings.karaoke_before_stroke_color}
+                          onChange={(v) =>
+                            update({ karaoke_before_stroke_color: v })
+                          }
+                        />
+                        <ColorRow
+                          label="走字后描边"
+                          value={settings.karaoke_after_stroke_color}
+                          onChange={(v) =>
+                            update({ karaoke_after_stroke_color: v })
+                          }
+                        />
+                      </>
+                    )}
+                    <Radio
+                      label="字幕字体"
+                      value={settings.karaoke_font}
+                      options={[
+                        { value: "gothic", label: "黑体" },
+                        { value: "mincho", label: "明朝" },
+                        { value: "rounded", label: "圆体" },
+                      ]}
+                      onChange={(v) => update({ karaoke_font: v })}
+                    />
+                    <div className="setrow">
+                      <span className="setlabel">
+                        描边宽度
+                        <span className="sethint">
+                          以 1080p 为基准,导出 4K 会自动放大
+                        </span>
+                      </span>
+                      <input
+                        className="setinput karaoke-number"
+                        type="number"
+                        min={0}
+                        max={8}
+                        step={0.5}
+                        value={settings.karaoke_stroke_width}
+                        onChange={(e) =>
+                          update({ karaoke_stroke_width: Number(e.target.value) })
+                        }
+                      />
+                    </div>
+                    <Toggle
+                      label="扫字高光带"
+                      hint="锋面处的一条提亮带;关掉后只剩连续的颜色扫过"
+                      on={settings.karaoke_scanline_enabled}
+                      onChange={(v) => update({ karaoke_scanline_enabled: v })}
+                    />
+                    {settings.karaoke_scanline_enabled && (
+                      <>
+                        <ColorRow
+                          label="高光带颜色"
+                          value={settings.karaoke_scanline_color}
+                          onChange={(v) => update({ karaoke_scanline_color: v })}
+                        />
+                        <div className="setrow">
+                          <span className="setlabel">高光带宽度</span>
+                          <input
+                            className="setinput karaoke-number"
+                            type="number"
+                            min={4}
+                            max={48}
+                            step={2}
+                            value={settings.karaoke_scanline_width}
+                            onChange={(e) =>
+                              update({
+                                karaoke_scanline_width: Number(e.target.value),
+                              })
+                            }
+                          />
+                        </div>
+                      </>
+                    )}
+                    <Toggle
+                      label="走字后发光"
+                      hint="已唱的字带一层同色外发光"
+                      on={settings.karaoke_glow}
+                      onChange={(v) => update({ karaoke_glow: v })}
                     />
                     <p className="sethint karaoke-note">
                       卡拉OK样式是点歌机画面:顶部左为当前句翻译、右为下一句翻译,
