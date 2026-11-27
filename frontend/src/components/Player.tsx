@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SPEEDS } from "../hooks/usePlayback";
-import type { RefObject, MouseEvent } from "react";
+import type { RefObject } from "react";
 
 interface PlayerProps {
   audioRef: RefObject<HTMLAudioElement | null>;
@@ -48,10 +48,18 @@ export function Player({
   const rate = controlledRate ?? localRate;
   const [speedOpen, setSpeedOpen] = useState(false);
 
-  /* AB drag: a range, not a click. `dragging` also suppresses the seek that
-     the click would otherwise fire when the mouse comes back up. */
+  /* Pointer drag on the progress bar:
+     - a plain drag scrubs in real time (live audio seek + time bubble);
+     - Shift + drag still defines an AB loop range;
+     - pointer capture keeps the gesture alive after the pointer leaves the
+       bar, so the user can drag anywhere on the page until they let go. */
+  const dragMode = useRef<"seek" | "ab" | null>(null);
   const dragStart = useRef<number | null>(null);
   const abDragging = useRef(false);
+  const pointerId = useRef<number | null>(null);
+  const scrubbing = useRef(false);
+  const previewRef = useRef<{ start: number; end: number } | null>(null);
+  const [scrub, setScrub] = useState<{ pct: number; time: number } | null>(null);
   const [preview, setPreview] = useState<{ start: number; end: number } | null>(null);
   const abRange = abLoop ?? preview;
 
@@ -69,35 +77,87 @@ export function Player({
     return pct * d;
   };
 
-  const beginAb = (e: React.MouseEvent<HTMLDivElement>) => {
+  const paint = (t: number) => {
+    const pct = ratio(t);
+    if (barRef.current) barRef.current.style.width = `${pct}%`;
+    if (knobRef.current) knobRef.current.style.left = `${pct}%`;
+    if (timeRef.current) timeRef.current.textContent = `${fmt(t)} / ${fmt(duration)}`;
+  };
+
+  const seekTo = (t: number) => {
+    const a = audioRef.current;
+    if (!a) return;
+    a.currentTime = Math.max(0, Math.min(duration || a.duration || 0, t));
+  };
+
+  const beginDrag = (e: React.PointerEvent<HTMLDivElement>) => {
     const a = audioRef.current;
     if (!a || !duration) return;
-    dragStart.current = timeAt(e.clientX, e.currentTarget);
-    abDragging.current = false;
-  };
-
-  const moveAb = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (dragStart.current === null) return;
-    const now = timeAt(e.clientX, e.currentTarget);
-    if (Math.abs(now - dragStart.current) < 0.4) return;
-    abDragging.current = true;
-    setPreview({
-      start: Math.min(dragStart.current, now),
-      end: Math.max(dragStart.current, now),
-    });
-  };
-
-  const endAb = () => {
-    if (dragStart.current === null) return;
-    const moved = abDragging.current;
-    dragStart.current = null;
-    abDragging.current = false;
-    if (!moved) {
-      setPreview(null);
+    const el = e.currentTarget;
+    // capture is what keeps pointermove/pointerup coming after the pointer
+    // leaves the bar; without it the drag died at the edge
+    el.setPointerCapture?.(e.pointerId);
+    pointerId.current = e.pointerId;
+    const t = timeAt(e.clientX, el);
+    if (e.shiftKey) {
+      dragMode.current = "ab";
+      dragStart.current = t;
+      abDragging.current = false;
       return;
     }
-    onAbLoop?.(preview);
-    setPreview(null);
+    dragMode.current = "seek";
+    scrubbing.current = true;
+    setScrub({ pct: ratio(t), time: t });
+    paint(t);
+    seekTo(t);
+    e.preventDefault();
+  };
+
+  const moveDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragMode.current) return;
+    const el = e.currentTarget;
+    const t = timeAt(e.clientX, el);
+    if (dragMode.current === "seek") {
+      setScrub({ pct: ratio(t), time: t });
+      paint(t);
+      seekTo(t);
+      return;
+    }
+    if (dragStart.current === null) return;
+    if (Math.abs(t - dragStart.current) < 0.4) return;
+    abDragging.current = true;
+    const next = {
+      start: Math.min(dragStart.current, t),
+      end: Math.max(dragStart.current, t),
+    };
+    previewRef.current = next;
+    setPreview(next);
+  };
+
+  const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragMode.current) return;
+    const el = e.currentTarget;
+    if (pointerId.current !== null) {
+      try {
+        el.releasePointerCapture(pointerId.current);
+      } catch {
+        // capture was already lost (window blur, element unmount)
+      }
+      pointerId.current = null;
+    }
+    if (dragMode.current === "ab") {
+      const moved = abDragging.current;
+      const range = previewRef.current;
+      dragStart.current = null;
+      abDragging.current = false;
+      previewRef.current = null;
+      if (moved && range) onAbLoop?.(range);
+      setPreview(null);
+    } else {
+      scrubbing.current = false;
+      setScrub(null);
+    }
+    dragMode.current = null;
   };
 
   // the controlled value can change from a shortcut, so mirror it onto the
@@ -111,7 +171,7 @@ export function Player({
     let raf = 0;
     const tick = () => {
       const a = audioRef.current;
-      if (a) {
+      if (a && !scrubbing.current) {
         const d = a.duration || 0;
         const pct = d ? Math.min(100, (a.currentTime / d) * 100) : 0;
         if (barRef.current) barRef.current.style.width = `${pct}%`;
@@ -138,13 +198,6 @@ export function Player({
     else a.pause();
   };
 
-  const seek = (e: MouseEvent<HTMLDivElement>) => {
-    const a = audioRef.current;
-    if (!a || !duration) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    a.currentTime = ((e.clientX - r.left) / r.width) * a.duration;
-  };
-
   return (
     <>
       {hasAudio && (
@@ -165,7 +218,9 @@ export function Player({
               <button className="playbtn" onClick={toggle} aria-label="play/pause">
                 <span className={`glyph ${paused ? "play" : "pause"}`} />
               </button>
-              <span className="hint">逐字同步 · 空格 播放/暂停 · ← → ±5s</span>
+              <span className="hint">
+                空格 播放/暂停 · ← → 上/下一句 · Shift + ← → 后退/前进 3 秒
+              </span>
               <button
                 className={`modetoggle${looping ? " on" : ""}`}
                 onClick={onToggleLoop}
@@ -215,13 +270,14 @@ export function Player({
             {/* drag across the bar to loop that range (AB 循环). A plain click
                 still seeks, so the two gestures do not fight. */}
             <div
-              className="progress"
-              onClick={seek}
-              onMouseDown={beginAb}
-              onMouseMove={moveAb}
-              onMouseUp={endAb}
-              onMouseLeave={() => {
-                if (abDragging.current) endAb();
+              className={`progress${scrub ? " scrubbing" : ""}`}
+              title="拖动定位；Shift + 拖动设置 AB 循环"
+              onPointerDown={beginDrag}
+              onPointerMove={moveDrag}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+              onLostPointerCapture={(e) => {
+                if (dragMode.current) endDrag(e);
               }}
             >
               <div className="track" />
@@ -236,6 +292,14 @@ export function Player({
               )}
               <div className="fill" ref={barRef} />
               <div className="knob" ref={knobRef} />
+              {scrub && (
+                <div
+                  className="scrub-tip"
+                  style={{ left: `${Math.min(96, Math.max(4, scrub.pct))}%` }}
+                >
+                  {fmt(scrub.time)}
+                </div>
+              )}
             </div>
             {abRange && (
               <button

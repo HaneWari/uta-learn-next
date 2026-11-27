@@ -58,3 +58,46 @@ class TestPresetSizing:
         size = export.preset(name)
         assert (size["width"] * size["scale"],
                 size["height"] * size["scale"]) == expected
+
+
+class TestOutputFolder:
+    def test_a_missing_export_folder_is_created(self, tmp_path, monkeypatch):
+        """A fresh portable has no `exports/` until the first export.
+
+        ffmpeg exits with -2 when the destination folder is missing, which the
+        UI showed as a bare "合并并混入音频" failure after a full render.
+        """
+        target = tmp_path / "not" / "created" / "yet" / "out.mp4"
+        monkeypatch.setattr(render_frames, "page_count", lambda requested=None: 1)
+
+        def fake_segment(base_url, song, preset_name, start, end, out, progress=None,
+                         extra_query=""):
+            out.write_bytes(b"\x00" * 1024)
+
+        monkeypatch.setattr(render_frames, "render_segment", fake_segment)
+        monkeypatch.setattr(
+            render_frames, "_concat",
+            lambda parts, audio, out, clip_start, duration: (
+                out.parent.mkdir(parents=True, exist_ok=True),
+                out.write_bytes(b"\x00" * 2048),
+            ),
+        )
+        monkeypatch.setattr(export, "_has_video", lambda p: True)
+        monkeypatch.setattr(render_frames, "tempfile", _FakeTempfile(tmp_path))
+        render_frames.render(
+            base_url="http://127.0.0.1:8000", song="song", audio=None,
+            out=target, duration=1.0, preset_name="landscape",
+        )
+        assert target.exists()
+
+
+class _FakeTempfile:
+    """`render()` would otherwise create and then delete a real temp dir."""
+
+    def __init__(self, root):
+        self.root = root
+
+    def mkdtemp(self, prefix=""):
+        path = self.root / f"{prefix}work"
+        path.mkdir(parents=True, exist_ok=True)
+        return str(path)

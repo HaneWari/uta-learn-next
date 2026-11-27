@@ -41,14 +41,14 @@ export const SHORTCUTS: Shortcut[] = [
   {
     keys: ["ArrowLeft"],
     shift: true,
-    label: "后退 5 秒",
+    label: "后退 3 秒",
     group: "播放",
     action: "seek-back",
   },
   {
     keys: ["ArrowRight"],
     shift: true,
-    label: "前进 5 秒",
+    label: "前进 3 秒",
     group: "播放",
     action: "seek-forward",
   },

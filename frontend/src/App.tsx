@@ -43,7 +43,7 @@ export default function App() {
   const [bgOpen, setBgOpen] = useState(false);
   const [offsetOpen, setOffsetOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settings] = useSettings();
+  const [settings, updateSettings] = useSettings();
   const [saveFailure, setSaveFailure] = useState<SaveFailure | null>(null);
   const [bookOpen, setBookOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -313,7 +313,7 @@ export default function App() {
               className={`exportbtn${exporting || envChecking ? " busy" : ""}`}
               onClick={() => void runExport()}
               disabled={!song || exporting || envChecking}
-              title="把当前这首渲染成 1920×1080 / 60fps 的 MP4"
+              title="把当前这首导出为 60fps 的 MP4（分辨率按导出预设）"
             >
               {envChecking
                 ? "检查环境…"
@@ -341,12 +341,17 @@ export default function App() {
         <BackgroundModal
           current={background}
           onClose={() => setBgOpen(false)}
-          // A custom photo is dark. `useTheme(background.mode === "custom")`
-          // derives dark from it while 跟随系统 is selected, so the stage flips
-          // the moment the image is applied — and flips back when the default
-          // background returns. Pinning `settings.theme` here would leave the
-          // user stuck in dark after they undo the background.
-          onApplied={setBackground}
+          // A custom photo is dark, so applying one switches the theme once.
+          // `useTheme` also derives dark while 跟随系统 is selected, but an
+          // explicit 浅色 choice used to win — which is why the stage stayed
+          // light for users who had picked light before. Persisting the switch
+          // here also makes 设置 show the truth; 浅色 can still be picked later.
+          onApplied={(bg) => {
+            setBackground(bg);
+            if (bg.mode === "custom" && settings.theme !== "dark") {
+              updateSettings({ theme: "dark" });
+            }
+          }}
         />
       )}
 

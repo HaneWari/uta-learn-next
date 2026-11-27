@@ -99,18 +99,13 @@ def api_export_fix():
             binaries.run(
                 [sys.executable, "-m", "pip", "install", "-q", "playwright"],
                 check=True, capture_output=True)
-        # launch failing means no usable browser; launch succeeding but
-        # record_video failing means the playwright ffmpeg component is
-        # missing — both are fixed by `playwright install`
-        if not checks["browser_launch"] or not checks.get("record_video", True):
+        # A launch failure is the only browser-side problem left: the frame
+        # renderer drives CDP and does not need Playwright's video component.
+        if not checks["browser_launch"]:
             progress(0.55, "下载 Chromium（约 130MB，请稍候）…")
             try:
                 binaries.run(
-                    # `record_video` needs playwright's own ffmpeg-* build too —
-                    # `install chromium` alone leaves new_context() demanding
-                    # ffmpeg-win64.exe that was never downloaded
-                    [sys.executable, "-m", "playwright", "install",
-                     "chromium", "ffmpeg"],
+                    [sys.executable, "-m", "playwright", "install", "chromium"],
                     check=True, capture_output=True, env=dict(os.environ))
             except Exception:  # noqa: BLE001
                 # playwright's own download being blocked is exactly the case
@@ -236,11 +231,7 @@ async def api_export(payload: ExportRequest, request: Request):
     jid = jobs.create("export", "export")
 
     def work(progress):
-        # 兼容模式 keeps the old screen recorder for machines where frame
-        # capture misbehaves; the default is the deterministic frame renderer
-        compat = bool(settings.get("export_compat", False))
-        renderer = export.render if compat else render_frames.render
-        renderer(
+        render_frames.render(
             base_url=_base_url(request),
             song=name,
             audio=audio,
@@ -251,12 +242,12 @@ async def api_export(payload: ExportRequest, request: Request):
             clip_start=clip_start,
             extra_query=("&hidecards=1" if hide_cards else "")
             + ("&hidetrans=1" if hide_trans else ""),
-            **({} if compat else {"pages": int(settings.get("export_pages", 3) or 3)}),
+            pages=int(settings.get("export_pages", 3) or 3),
         )
         return {"file": out.name, "url": f"/api/exports/{out.name}",
                 "size": out.stat().st_size, "duration": duration,
                 "dir": str(out.parent), "path": str(out), "fps": export.FPS,
-                "renderer": "compat" if compat else "frames",
+                "renderer": "frames",
                 "preset": preset_name, "clip_start": clip_start,
                 "width": export.preset(preset_name)["width"]
                 * export.preset(preset_name)["scale"],

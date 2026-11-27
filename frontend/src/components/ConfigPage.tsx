@@ -118,7 +118,7 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
         setNotice(`扩展安装失败：${done.error ?? "未知错误"}`);
       } else {
         setModelInstalled(true);
-        setNotice("语音识别扩展已装好，可以离线自定义歌词了");
+        setNotice("自定义歌词扩展包已装好，可以离线对齐歌词了");
       }
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e));
@@ -570,17 +570,19 @@ export function ConfigPage({ songs, onRefresh, onPlay, onDeleted }: Props) {
             </>
           ) : mode === "custom" ? (
             <>
-              {/* the speech model is a separate download, not part of lite —
-                  surface its state right where it is needed so a missing pack
-                  is a one-click fix instead of a failed build */}
+              {/* The models are a separate download, not part of the core
+                  package. Surface their state where they are needed so a
+                  missing pack is a one-click fix instead of a failed build. */}
               <div className={`model-banner${modelInstalled ? " ok" : ""}`}>
                 {modelInstalled ? (
-                  <span className="model-ok">✓ 语音识别扩展已就绪，可离线对齐歌词</span>
+                  <span className="model-ok">✓ 自定义歌词扩展包已就绪，可离线对齐歌词</span>
                 ) : (
                   <>
                     <div className="model-banner-text">
-                      <strong>自定义歌词需要模型扩展包</strong>
-                      <span>含语音识别 + 日中翻译模型，约 265MB，一次性下载即可离线使用（不随版本更新）</span>
+                      <strong>自定义歌词扩展包尚未安装</strong>
+                      <span>
+                        含语音识别 + 日中翻译模型，约 265MB，一次性下载即可离线使用（不随版本更新）
+                      </span>
                     </div>
                     <div className="model-banner-actions">
                       <button

@@ -2,10 +2,13 @@ import { useCallback, useEffect, useState } from "react";
 import { api, waitForJob } from "../api";
 import { useSettings } from "../lib/settings";
 import type { AboutInfo, AppSettings, PackStatus } from "../types";
+import { ShortcutGroups } from "./ShortcutHelp";
+import { ConfirmDialog } from "./ConfirmDialog";
 
 type Group =
   | "general"
   | "display"
+  | "shortcuts"
   | "lyrics"
   | "network"
   | "export"
@@ -16,6 +19,7 @@ type Group =
 const GROUPS: { id: Group; label: string }[] = [
   { id: "general", label: "常规" },
   { id: "display", label: "显示" },
+  { id: "shortcuts", label: "快捷键" },
   { id: "lyrics", label: "歌词" },
   { id: "network", label: "网络" },
   { id: "export", label: "导出" },
@@ -35,7 +39,7 @@ function humanSize(bytes: number): string {
 const PACK_META = {
   custom_lyrics: {
     title: "自定义歌词扩展包",
-    hint: "whisper 语音识别 + 日中翻译模型;自定义歌词与中文翻译都需要它",
+    hint: "含 whisper 语音识别与日中翻译模型；自定义歌词和中文翻译都需要它",
   },
   chromium: {
     title: "Chromium 扩展包",
@@ -117,6 +121,69 @@ function Radio<T extends string>({
   );
 }
 
+/** 页面缩放以百分比输入；输入过程中不立刻夹取，失焦或回车时才提交。 */
+function ZoomField({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const current = Math.round(value * 100);
+  const [draft, setDraft] = useState(String(current));
+
+  useEffect(() => {
+    setDraft(String(current));
+  }, [current]);
+
+  const commit = () => {
+    const n = Number(draft);
+    if (!Number.isFinite(n)) {
+      setDraft(String(current));
+      return;
+    }
+    const clamped = Math.min(150, Math.max(80, Math.round(n / 5) * 5));
+    setDraft(String(clamped));
+    if (clamped / 100 !== value) onChange(clamped / 100);
+  };
+
+  return (
+    <div className="zoom-field">
+      <input
+        className="setinput zoom-input"
+        type="number"
+        min={80}
+        max={150}
+        step={5}
+        inputMode="numeric"
+        value={draft}
+        aria-label="页面缩放百分比"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit();
+            (e.currentTarget as HTMLInputElement).blur();
+          }
+        }}
+      />
+      <span className="zoom-unit">%</span>
+      <button
+        type="button"
+        className="btn small"
+        onClick={() => {
+          setDraft("100");
+          onChange(1);
+        }}
+        disabled={value === 1}
+      >
+        重置
+      </button>
+    </div>
+  );
+}
+
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [settings, update] = useSettings();
   const [group, setGroup] = useState<Group>("general");
@@ -125,6 +192,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [packs, setPacks] = useState<PackStatus[]>([]);
   const [packBusy, setPackBusy] = useState<string | null>(null);
   const [packNote, setPackNote] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<PackStatus["key"] | null>(null);
   const [proxyNote, setProxyNote] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   /* legacy data import (§5.5.3) */
@@ -166,11 +234,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      // 删除确认框自己处理 Esc；否则会连设置页一起关掉。
+      if (e.key === "Escape" && !confirmRemove) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, confirmRemove]);
 
   /** Download (or re-download) one pack, then re-read the real size. */
   async function installPack(key: PackStatus["key"]) {
@@ -204,7 +273,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   async function removePack(key: PackStatus["key"]) {
     const meta = PACK_META[key];
-    if (!window.confirm(`确定删除「${meta.title}」吗?\n需要时可以再装回来。`)) return;
     setPackBusy(key);
     setPackNote(null);
     try {
@@ -293,9 +361,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="bgmask" role="dialog" aria-modal="true" aria-label="设置">
-      <div className="bgmodal setmodal">
-        <header className="bghead">
+    <>
+      <div className="bgmask" role="dialog" aria-modal="true" aria-label="设置">
+        <div className="bgmodal setmodal">
+          <header className="bghead">
           <h2>设置</h2>
           <button className="bgclose" onClick={onClose} aria-label="关闭">
             ×
@@ -404,28 +473,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       整个界面的比例,「100%」为默认;{Math.round(settings.page_zoom * 100)}%
                     </span>
                   </span>
-                  <div className="zoom-row">
-                    <input
-                      className="zoom-slider"
-                      type="range"
-                      min={80}
-                      max={150}
-                      step={5}
-                      value={Math.round(settings.page_zoom * 100)}
-                      onChange={(e) =>
-                        update({ page_zoom: Number(e.target.value) / 100 })
-                      }
-                      aria-label="页面缩放"
-                    />
-                    <button
-                      type="button"
-                      className="btn small"
-                      onClick={() => update({ page_zoom: 1 })}
-                      disabled={settings.page_zoom === 1}
-                    >
-                      重置
-                    </button>
-                  </div>
+                  <ZoomField
+                    value={settings.page_zoom}
+                    onChange={(v) => update({ page_zoom: v })}
+                  />
                 </div>
                 <Toggle
                   label="减少动效"
@@ -457,6 +508,17 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     }
                   />
                 ))}
+              </>
+            )}
+
+            {group === "shortcuts" && (
+              <>
+                <p className="sethint">
+                  在播放页按下按键即可生效；正在输入文字时，单键快捷键会自动
+                  让位给输入框。按 <kbd className="inline-kbd">?</kbd> 也能
+                  随时打开这张表。
+                </p>
+                <ShortcutGroups />
               </>
             )}
 
@@ -548,12 +610,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     ))}
                   </select>
                 </div>
-                <Toggle
-                  label="兼容模式（旧录屏器）"
-                  hint="只在导出画面异常时打开"
-                  on={settings.export_compat}
-                  onChange={(v) => update({ export_compat: v })}
-                />
               </>
             )}
 
@@ -591,7 +647,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         <button
                           type="button"
                           className="btn small"
-                          onClick={() => void removePack(pack.key)}
+                          onClick={() => setConfirmRemove(pack.key)}
                           disabled={busy || !pack.installed}
                         >
                           删除
@@ -801,7 +857,22 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+      {confirmRemove && (
+        <ConfirmDialog
+          title="删除扩展包"
+          message={`确定删除「${PACK_META[confirmRemove].title}」吗？需要时可以再装回来。`}
+          confirmLabel="删除"
+          danger
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={() => {
+            const key = confirmRemove;
+            setConfirmRemove(null);
+            void removePack(key);
+          }}
+        />
+      )}
+    </>
   );
 }
 

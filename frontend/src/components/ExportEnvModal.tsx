@@ -209,12 +209,6 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
                   ""
                 )}
               </li>
-              {c?.browser_launch === true && c?.record_video === false && (
-                <li className="dim">
-                  兼容模式录制组件（不影响正常导出）
-                  <span className="env-err">{c.record_error}</span>
-                </li>
-              )}
               <li className={c?.ffmpeg ? "ok" : "bad"}>
                 ffmpeg{c?.ffmpeg ? "" : "（缺失，无法合成视频）"}
               </li>
@@ -272,8 +266,8 @@ export function ExportEnvModal({ onReady, onClose }: Props) {
               <button className="btn primary" onClick={() => void fix()}>
                 自动修复
               </button>
-          <button className="btn" onClick={() => void probe(true)}>
-                重新检测
+              <button className="btn" onClick={() => void installChromium()}>
+                安装 Chromium 扩展包
               </button>
             </div>
           </>

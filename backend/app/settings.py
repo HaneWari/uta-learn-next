@@ -48,7 +48,6 @@ DEFAULTS: dict[str, Any] = {
     # 导出
     "export_preset": "landscape",    # landscape | portrait | 4k
     "export_pages": 3,
-    "export_compat": False,
     # 匿名统计
     "install_id": "",
     "telemetry_last_day": "",

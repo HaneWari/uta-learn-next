@@ -33,7 +33,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   proxy_url: "",
   export_preset: "landscape",
   export_pages: 3,
-  export_compat: false,
   install_id: "",
   telemetry_last_day: "",
 };

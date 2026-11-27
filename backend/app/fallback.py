@@ -232,7 +232,7 @@ def _model_root() -> Path:
 
 def _model_missing_msg() -> str:
     return (
-        "未找到语音识别模型。这个功能需要「自定义歌词模型扩展包」：在配置页点"
+        "未找到语音识别模型。这个功能需要「自定义歌词扩展包」：在配置页点"
         "「下载并安装扩展」一键装好，或到发行版页面下载 "
         "UtaLearnNext-custom-lyrics.zip，解压到应用目录的 models/ 下"
         "（得到 models/whisper-small/）后重启。"

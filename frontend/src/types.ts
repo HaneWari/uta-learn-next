@@ -178,10 +178,6 @@ export interface ExportEnv {
     bundled_chromium: boolean;
     browser_launch: boolean;
     launch_error: string;
-    /** whether 兼容模式 could record (not needed by the default path) */
-    record_video: boolean;
-    compat_ready?: boolean;
-    record_error: string;
     ffmpeg: boolean;
     candidates: string[];
   };
@@ -220,7 +216,6 @@ export interface AppSettings {
   proxy_url: string;
   export_preset: "landscape" | "portrait" | "4k";
   export_pages: number;
-  export_compat: boolean;
   install_id: string;
   telemetry_last_day: string;
 }

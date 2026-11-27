@@ -58,17 +58,16 @@ class TestPresetsApi:
 
 
 class TestEnvCheck:
-    """§5.4.2: the recorder component must not gate the default path."""
+    """§5.4.2: the frame renderer needs no recording component."""
 
-    def test_a_missing_recorder_no_longer_fails_the_probe(self, monkeypatch):
+    def test_a_healthy_browser_and_ffmpeg_are_enough(self, monkeypatch):
         monkeypatch.setattr(export, "pick_browser", lambda *a, **k: ("chrome.exe", ""))
-        monkeypatch.setattr(export, "probe_record_video", lambda *a, **k: (False, "no ffmpeg"))
         monkeypatch.setattr(export.binaries, "find", lambda name: "ffmpeg")
         env = export.env_check()
         assert env["ok"] is True
         assert env["state"] == "ok"
-        # still reported, because 兼容模式 needs it
-        assert env["checks"]["compat_ready"] is False
+        assert "record_video" not in env["checks"]
+        assert "compat_ready" not in env["checks"]
 
     def test_a_missing_browser_still_fails(self, monkeypatch):
         monkeypatch.setattr(export, "pick_browser", lambda *a, **k: (None, "boom"))

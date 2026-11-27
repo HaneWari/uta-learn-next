@@ -419,10 +419,20 @@ body {
 
 .progress {
   position: relative;
-  height: 14px;
+  height: 18px;
   display: flex;
   align-items: center;
   cursor: pointer;
+  touch-action: none;
+}
+
+/* A 3px line is impossible to grab. The pseudo-element expands the hit area
+   ~10px above and below without changing the dock layout. */
+.progress::before {
+  content: "";
+  position: absolute;
+  inset: -10px 0;
+  border-radius: 10px;
 }
 
 .progress .track {
@@ -453,6 +463,25 @@ body {
   box-shadow: 0 0 0 4px rgba(255, 138, 61, 0.14),
     0 0 16px rgba(255, 138, 61, 0.45);
   transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* During a scrub: the time bubble follows the pointer. */
+.scrub-tip {
+  position: absolute;
+  bottom: 26px;
+  z-index: 3;
+  padding: 2px 8px;
+  border-radius: 7px;
+  border: 1px solid var(--line);
+  background: var(--surface-solid);
+  color: var(--body);
+  font-size: calc(11.5px * var(--ui-scale, 1));
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  pointer-events: none;
+  box-shadow: var(--shadow-s);
 }
 
 /* ---------- curtain (closing card) ---------- */
@@ -2032,6 +2061,40 @@ body {
   filter: brightness(1.05);
 }
 
+/* 应用内确认框:叠在设置页之上，视觉与其它弹窗一致 */
+.bgmask.confirm-mask {
+  z-index: 60;
+}
+
+.confirmmodal {
+  width: min(440px, 92vw);
+  padding: 22px 24px 18px;
+}
+
+.confirm-msg {
+  margin: 8px 0 20px;
+  font-size: calc(13.5px * var(--ui-scale, 1));
+  line-height: 1.75;
+  color: #5a4634;
+  overflow-wrap: anywhere;
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+html[data-theme="dark"] .confirm-msg {
+  color: rgba(232, 214, 194, 0.92);
+}
+
+html[data-theme="dark"] .btn.danger {
+  color: #fff;
+  background: linear-gradient(160deg, #e2603f, #b3541e);
+  border-color: transparent;
+}
+
 .songrow .btn.small + .btn.small {
   margin-left: 2px;
 }
@@ -3000,22 +3063,36 @@ html[data-theme="dark"] .legacy-card header {
 
 .lyrics-rail {
   position: fixed;
-  top: 72px;
-  right: 0;
-  bottom: 110px;
-  width: 300px;
+  top: 64px;
+  right: 12px;
+  bottom: 118px;
+  width: 322px;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid rgba(178, 146, 116, 0.28);
-  background: rgba(255, 252, 246, 0.94);
-  backdrop-filter: blur(6px);
+  border: 1px solid rgba(178, 146, 116, 0.32);
+  border-radius: 16px;
+  background: rgba(255, 252, 246, 0.97);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 26px 60px -34px rgba(60, 40, 24, 0.7);
+  overflow: hidden;
   z-index: 30;
-  transition: transform 0.22s var(--ease-out);
+  transition: transform 0.24s var(--ease-out), opacity 0.18s ease;
 }
 
 .lyrics-rail.hidden {
-  transform: translateX(100%);
+  transform: translateX(calc(100% + 30px));
+  opacity: 0;
   pointer-events: none;
+}
+
+/* 贴边的隐形触发条：不占视觉，指针进入即展开 */
+.rail-zone {
+  position: fixed;
+  top: 58px;
+  right: 0;
+  bottom: 104px;
+  width: 18px;
+  z-index: 28;
 }
 
 .rail-head {
@@ -3065,24 +3142,35 @@ html[data-theme="dark"] .legacy-card header {
 
 .rail-toggle {
   position: fixed;
-  right: 12px;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
-  z-index: 31;
-  padding: 10px 6px;
-  border: 1px solid rgba(178, 146, 116, 0.4);
-  border-radius: 9px;
-  background: rgba(255, 252, 246, 0.9);
+  z-index: 29;
+  padding: 18px 5px;
+  border: 1px solid rgba(178, 146, 116, 0.42);
+  border-right: 0;
+  border-radius: 11px 0 0 11px;
+  background: rgba(255, 252, 246, 0.94);
+  backdrop-filter: blur(6px);
+  box-shadow: -8px 8px 24px -18px rgba(60, 40, 24, 0.6);
   font: inherit;
-  font-size: calc(11px * var(--ui-scale, 1));
+  font-size: calc(11.5px * var(--ui-scale, 1));
+  letter-spacing: 0.18em;
   writing-mode: vertical-rl;
   color: #6b5540;
   cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+}
+
+.rail-toggle:hover {
+  background: rgba(255, 244, 232, 0.98);
+  color: #b7541c;
 }
 
 html[data-theme="dark"] .lyrics-rail {
   background: rgba(36, 29, 23, 0.95);
   border-color: rgba(214, 178, 140, 0.22);
+  box-shadow: 0 26px 60px -30px rgba(0, 0, 0, 0.9);
 }
 
 html[data-theme="dark"] .rail-head h3,
@@ -3094,6 +3182,20 @@ html[data-theme="dark"] .rail-toggle {
   background: rgba(36, 29, 23, 0.9);
   border-color: rgba(214, 178, 140, 0.3);
   color: #e8d6c1;
+}
+
+html[data-theme="dark"] .rail-toggle:hover {
+  background: rgba(60, 46, 36, 0.95);
+  color: #ffb27a;
+}
+
+html[data-theme="dark"] .rail-line:hover {
+  background: rgba(214, 178, 140, 0.12);
+}
+
+html[data-theme="dark"] .rail-line.on {
+  background: rgba(255, 138, 61, 0.18);
+  color: #ffb27a;
 }
 .lyr-tools {
   display: flex;
@@ -3713,6 +3815,17 @@ html[data-theme="dark"] .modetoggle {
   color: rgba(236, 223, 208, 0.9);
 }
 
+/* Selected playback modes must read as clearly on dark paper as the light
+   theme's coral pill. Without this rule `.on` fell back to the neutral base
+   above and 单句循环 / 跟读 looked off even when they were on. */
+html[data-theme="dark"] .modetoggle.on {
+  border-color: var(--coral);
+  background: rgba(255, 138, 61, 0.24);
+  color: #ffb27a;
+  font-weight: 600;
+  box-shadow: 0 0 0 2px rgba(255, 138, 61, 0.12);
+}
+
 .gearbtn {
   width: 40px;
   padding: 0;
@@ -3927,16 +4040,34 @@ html[data-theme="dark"] .modetoggle {
   flex: none;
 }
 
-/* 页面缩放滑块 */
-.zoom-row {
+/* 页面缩放：百分比输入框 */
+.zoom-field {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
-.zoom-slider {
-  width: 168px;
-  accent-color: var(--coral);
+.zoom-input {
+  width: 86px;
+  min-width: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.zoom-unit {
+  font-size: calc(13px * var(--ui-scale, 1));
+  color: var(--body-soft);
+}
+
+.inline-kbd {
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.92em;
+  background: var(--chip);
+  color: var(--body);
 }
 
 /* ---------- dark theme + reduced motion ---------- */

@@ -15,7 +15,7 @@ import { Player } from "./Player";
 import { LyricsDisplay } from "./LyricsDisplay";
 import { VocabCards } from "./VocabCards";
 
-const SEEK_STEP = 5;
+const SEEK_STEP = 3;
 
 /** URL flag names the export recorder uses for each layer. */
 const LAYER_URL: Record<"furigana" | "romaji" | "next_line", string> = {
@@ -322,7 +322,8 @@ const toggleTrans = () => {
           segments={visibleSegments}
           activeId={visibleSegments[syncState.displayIndex]?.id ?? null}
           open={railOpen}
-          onToggle={() => setRailOpen(!railOpen)}
+          onOpen={() => setRailOpen(true)}
+          onClose={() => setRailOpen(false)}
           onSeek={(seg) => {
             const a = audioRef.current;
             if (a) {

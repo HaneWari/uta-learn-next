@@ -24,6 +24,29 @@ function combo(keys: string[], shift?: boolean, ctrl?: boolean) {
   return parts.join(" + ");
 }
 
+/** The generated shortcut table, shared by the ? sheet and 设置 → 快捷键. */
+export function ShortcutGroups() {
+  return (
+    <div className="keygrid">
+      {GROUPS.map((group) => {
+        const items = SHORTCUTS.filter((s) => s.group === group);
+        if (!items.length) return null;
+        return (
+          <section key={group} className="keycol">
+            <h3>{group}</h3>
+            {items.map((s) => (
+              <div className="keyrow" key={s.label}>
+                <kbd>{combo(s.keys, s.shift, s.ctrl)}</kbd>
+                <span>{s.label}</span>
+              </div>
+            ))}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 /** `?` opens this; the table is generated from the same list the handler uses. */
 export function ShortcutHelp({ onClose }: { onClose: () => void }) {
   useEffect(() => {
@@ -46,23 +69,7 @@ export function ShortcutHelp({ onClose }: { onClose: () => void }) {
         <p className="bghint">
           编辑输入框时不响应单键快捷键，避免和打字冲突。
         </p>
-        <div className="keygrid">
-          {GROUPS.map((group) => {
-            const items = SHORTCUTS.filter((s) => s.group === group);
-            if (!items.length) return null;
-            return (
-              <section key={group} className="keycol">
-                <h3>{group}</h3>
-                {items.map((s) => (
-                  <div className="keyrow" key={s.label}>
-                    <kbd>{combo(s.keys, s.shift, s.ctrl)}</kbd>
-                    <span>{s.label}</span>
-                  </div>
-                ))}
-              </section>
-            );
-          })}
-        </div>
+        <ShortcutGroups />
       </div>
     </div>
   );

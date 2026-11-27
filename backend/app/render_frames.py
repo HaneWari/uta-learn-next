@@ -21,6 +21,7 @@ import subprocess
 import tempfile
 import threading
 from pathlib import Path
+from urllib.parse import quote
 
 from app import binaries, export
 
@@ -55,7 +56,7 @@ def render_segment(base_url: str, song: str, preset_name: str,
     height = size["height"] * size["scale"]
     frames = max(1, int(round((end - start) * FPS)))
     out.parent.mkdir(parents=True, exist_ok=True)
-    url = (f"{base_url}/?song={export.quote(song, safe='')}&render=1"
+    url = (f"{base_url}/?song={quote(song, safe='')}&render=1"
            + extra_query)
 
     with sync_playwright() as pw:
@@ -143,6 +144,9 @@ def render(base_url: str, song: str, audio: Path | None, out: Path,
     p = progress or (lambda frac, msg: None)
     n = page_count(pages)
     span = duration / n
+    # A missing export folder must not fail the last step: the app offers
+    # 导出记录/打开文件夹 even when nothing was ever written there.
+    out.parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="utaframes_"))
     try:
         parts: list[Path] = []
