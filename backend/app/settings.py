@@ -34,7 +34,7 @@ DEFAULTS: dict[str, Any] = {
     "ui_font": "m",                  # s | m | l : 界面字号
     "page_zoom": 1.0,                # 0.8 - 1.5 : 整页缩放
     "play_style": "default",         # default | karaoke : 播放页样式
-    "karaoke_color": "coral",        # coral | blue | green : 卡拉OK字幕主色
+    "karaoke_color": "red",          # red | coral | blue | green : 卡拉OK字幕主色
     "default_layers": {
         "furigana": True,
         "romaji": True,

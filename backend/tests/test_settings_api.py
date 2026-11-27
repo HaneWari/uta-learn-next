@@ -49,6 +49,7 @@ def test_display_scale_values_are_validated(client):
 
 def test_play_style_and_karaoke_colour_are_validated(client):
     assert client.patch("/api/settings", json={"play_style": "karaoke"}).status_code == 200
+    assert client.patch("/api/settings", json={"karaoke_color": "red"}).status_code == 200
     assert client.patch("/api/settings", json={"karaoke_color": "blue"}).status_code == 200
     assert client.patch("/api/settings", json={"play_style": "concert"}).status_code == 400
     assert client.patch("/api/settings", json={"karaoke_color": "pink"}).status_code == 400
@@ -57,4 +58,4 @@ def test_play_style_and_karaoke_colour_are_validated(client):
 def test_display_defaults_include_the_playback_style(client):
     data = client.get("/api/settings").json()
     assert data["play_style"] == "default"
-    assert data["karaoke_color"] == "coral"
+    assert data["karaoke_color"] == "red"

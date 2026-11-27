@@ -530,9 +530,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   <>
                     <Radio
                       label="卡拉OK主题色"
-                      hint="字幕板里已唱部分的颜色;注音与罗马音保持白色系"
+                      hint="字幕里已唱部分的颜色;注音与罗马音保持白色系"
                       value={settings.karaoke_color}
                       options={[
+                        { value: "red", label: "经典红" },
                         { value: "coral", label: "珊瑚色" },
                         { value: "blue", label: "深蓝色" },
                         { value: "green", label: "绿色" },
@@ -540,8 +541,10 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       onChange={(v) => update({ karaoke_color: v })}
                     />
                     <p className="sethint karaoke-note">
-                      卡拉OK样式不显示中文翻译和词条卡片;右键字幕可切换注音与罗马音。
-                      导出视频时不会出现底部控制栏、进度条和右侧歌词列表。
+                      卡拉OK样式是点歌机画面:顶部左为当前句翻译、右为下一句翻译,
+                      中间画面叠当前句歌词,底部黑边预告下一句;不显示词条卡片。
+                      右键字幕可切换注音、罗马音与翻译;导出时不会出现控制栏、
+                      进度条和右侧歌词列表。
                     </p>
                   </>
                 )}

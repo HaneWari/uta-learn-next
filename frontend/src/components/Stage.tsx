@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import type { Segment, SongData, StageBackground } from "../types";
 import { useSyncEngine } from "../hooks/useSyncEngine";
 import { usePlayback } from "../hooks/usePlayback";
@@ -109,8 +109,18 @@ const toggleTrans = () => {
   // hidden lines are left in the dataset but skipped everywhere the timeline
   // is consumed — the sync engine, the lyric display and the vocab row all
   // see the same filtered segment list, so a removed line just never plays.
-  const visibleSegments = songData.segments.filter((s) => !s.hidden);
-  const visibleData: SongData = { ...songData, segments: visibleSegments };
+  /* The sync engine keys its clock on `songData`. A fresh object on every
+     render re-ran its effect and reset the virtual clock to 0, which made
+     `?render=1` screenshot the first line for every frame of an export.
+     Both values come straight from the dataset, so memoising on it is exact. */
+  const visibleSegments = useMemo(
+    () => songData.segments.filter((s) => !s.hidden),
+    [songData],
+  );
+  const visibleData: SongData = useMemo(
+    () => ({ ...songData, segments: visibleSegments }),
+    [songData, visibleSegments],
+  );
   // the export page hands time over to the renderer frame by frame
   const { syncState, clockRef } = useSyncEngine(visibleData, audioRef, render);
   const audioSrc = `/api/audio/${encodeURIComponent(song)}`;
@@ -288,6 +298,7 @@ const toggleTrans = () => {
             color={settings.karaoke_color}
             showFurigana={!layerHidden("furigana", "hidefurigana")}
             showRomaji={!layerHidden("romaji", "hideromaji")}
+            showTranslation={!transHidden}
             song={song}
             onPatch={render ? undefined : onPatchSegment}
             onNudgeLine={render ? undefined : onNudgeLine}
@@ -417,6 +428,15 @@ const toggleTrans = () => {
             }}
           >
             {layerHidden("romaji", "hideromaji") ? "显示罗马音" : "隐藏罗马音"}
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              setKaraokeMenu(null);
+              toggleTrans();
+            }}
+          >
+            {transHidden ? "显示中文翻译" : "隐藏中文翻译"}
           </button>
         </div>
       )}

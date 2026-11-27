@@ -268,32 +268,35 @@ body {
 /* ==========================================================================
    karaoke style
 
-   参考点歌机的字幕板:深色半透明底、白字描边、逐字扫成主题色。两种样式只换
-   排版与配色,字形拆分和高亮状态完全共享默认样式的那一套(见 KaraokeStage)。
+   经典点歌机的三区结构(参考用户提供的卡拉OK MV 截图):
+     ① 顶部黑边   —— 整句中文翻译,已唱部分红色、未唱白色;
+     ② 中间画面区 —— 当前句压在画面下沿,已唱红字、未唱白字 + 硬描边,
+                     注音在上、罗马音在下;
+     ③ 底部黑边   —— 下一句白字预告。
+
+   换句规则:当前句唱完才整句切换,不滚动、不提前替换,这样导出成
+   字幕 MV 时,上下两条黑边就是天然的字幕带。
    ========================================================================== */
 
-/* 整页是一块暗场舞台,而不只是中间的字幕板:否则浅色纸底上的白色歌名
-   和浅色描边字都会失去对比。导出页走同一套背景,画面才和播放时一致。 */
+/* 整页先铺成电影画幅:上下黑边由舞台自己画,背景退到最暗 */
 .app.karaoke-style {
-  background:
-    radial-gradient(circle at 50% 40%, #1b2231 0%, #0c0f17 58%, #07080d 100%);
+  background: #000;
   --ink: #f4ece0;
   --line: rgba(255, 246, 234, 0.18);
 }
 
 .app.karaoke-style .grain {
-  opacity: 0.035;
-  mix-blend-mode: screen;
+  display: none;
 }
 
 /* 卡拉OK播放页是暗场,导航栏也要跟着压暗,否则顶部一条白带把画面切断 */
 .shell:has(.app.karaoke-style) {
-  background: #07080d;
+  background: #000;
 }
 
 .shell:has(.app.karaoke-style) .tabbar {
   border-bottom-color: rgba(255, 246, 234, 0.12);
-  background: linear-gradient(180deg, #141821, #0b0e14);
+  background: #000;
 }
 
 .shell:has(.app.karaoke-style) .tabbar .tab,
@@ -325,94 +328,143 @@ body {
   background: rgba(255, 255, 255, 0.06);
 }
 
+/* 三区纵向布局:黑边固定高度,中间画面吃掉剩余空间 */
+/* 卡拉OK是画幅,横向要铺满:去掉主区域左右留白,只在底部给控制栏让位 */
+.app.karaoke-style .main {
+  padding: 0 0 clamp(92px, 11vh, 124px);
+}
+
 .karaoke-stage {
-  --k-color: #ff8a3d;
-  --k-deep: #f2621f;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  /* 默认就是点歌机的经典红 */
+  --k-color: #ff2020;
+  --k-deep: #d01010;
+  --k-glow: rgba(255, 32, 32, 0.55);
   position: relative;
   z-index: 3;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
-  padding: 0 clamp(16px, 3vw, 48px);
+  background: #000;
+}
+
+.karaoke-stage[data-color="red"] {
+  --k-color: #ff2020;
+  --k-deep: #d01010;
+  --k-glow: rgba(255, 32, 32, 0.55);
+}
+
+.karaoke-stage[data-color="coral"] {
+  --k-color: #ff8a3d;
+  --k-deep: #f2621f;
+  --k-glow: rgba(255, 138, 61, 0.55);
 }
 
 .karaoke-stage[data-color="blue"] {
   --k-color: #3fa9ff;
   --k-deep: #1476d2;
+  --k-glow: rgba(63, 169, 255, 0.55);
 }
 
 .karaoke-stage[data-color="green"] {
   --k-color: #45d98a;
   --k-deep: #17a45f;
+  --k-glow: rgba(69, 217, 138, 0.5);
 }
 
-.karaoke-board {
+/* ---------- ① 顶部黑边:翻译 ---------- */
+
+.karaoke-top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: clamp(64px, 13vh, 132px);
+  padding: clamp(8px, 1.6vh, 18px) clamp(24px, 5vw, 96px);
+  background: #000;
+}
+
+/* 参考图:左边是当前句翻译(主题色),右边是下一句翻译(白色) */
+.karaoke-zh-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: clamp(24px, 5vw, 90px);
   width: 100%;
   max-width: 1500px;
-  /* 长句优先缩字而不是换行:一行字幕是卡拉OK的阅读节奏 */
+  animation: karaokeZhIn 0.2s ease-out both;
+}
+
+.karaoke-zh {
+  min-width: 0;
+  font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", "Noto Sans SC",
+    "Microsoft YaHei", sans-serif;
+  font-size: clamp(17px, 1.9vw, 34px);
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.9));
+}
+
+.karaoke-zh.cur {
+  flex: 0 1 auto;
+  text-align: left;
+  color: var(--k-color);
+  text-shadow: 0 0 14px var(--k-glow);
+}
+
+.karaoke-zh.next {
+  flex: 0 1 auto;
+  text-align: right;
+  color: #fff;
+  opacity: 0.92;
+}
+
+@keyframes karaokeZhIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ---------- ② 中间画面区:当前句 ---------- */
+
+.karaoke-screen {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: clamp(14px, 2.4vh, 30px);
-  padding: clamp(22px, 3.4vh, 44px) clamp(24px, 3vw, 56px);
-  border-radius: 22px;
-  background: linear-gradient(
-    180deg,
-    rgba(16, 21, 33, 0.72),
-    rgba(6, 9, 16, 0.88)
-  );
-  border: 1px solid rgba(255, 246, 234, 0.08);
-  box-shadow: 0 40px 90px -60px rgba(0, 0, 0, 0.95);
-}
-
-.app[data-bg="default"] .karaoke-board {
-  /* 深色舞台上的字幕板加一点内发光,和背景分层 */
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 40px 90px -60px rgba(0, 0, 0, 0.95);
-}
-
-.karaoke-next {
-  min-height: clamp(38px, 5vh, 62px);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  opacity: 0.62;
-  transition: opacity 0.3s ease;
-}
-
-.karaoke-next-line {
-  display: inline-flex;
   align-items: flex-end;
-  gap: 4px;
-  font-family: var(--serif);
-  font-size: clamp(17px, 1.5vw, 26px);
-  line-height: 1.1;
-  color: rgba(255, 255, 255, 0.9);
+  justify-content: center;
+  padding: 0 clamp(20px, 4vw, 80px) clamp(12px, 2vh, 26px);
+  /* 自定义 MV 会换成视频/图片;没有素材时是暗场渐变 */
+  background:
+    radial-gradient(circle at 50% 30%, #1a1f2b 0%, #0a0c11 62%, #05060a 100%);
+  overflow: hidden;
 }
 
-.karaoke-next-romaji {
-  font-size: clamp(11px, 0.85vw, 15px);
-  letter-spacing: 0.12em;
-  color: rgba(255, 255, 255, 0.6);
+/* 导出时没有控制栏,画面一直铺到画幅底部 */
+.app.karaoke-style.render-mode .main {
+  padding: 0;
 }
 
 .karaoke-cur {
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: clamp(8px, 1.2vh, 16px);
-  animation: karaokeIn 0.36s var(--ease-out) both;
+  animation: karaokeLineIn 0.22s ease-out both;
 }
 
-@keyframes karaokeIn {
+@keyframes karaokeLineIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
@@ -420,117 +472,192 @@ body {
   }
 }
 
+/* 当前句:整句是纵向三行(注音+正文、罗马音),正文那行单行不换行 */
 .karaoke-line {
   display: flex;
-  flex-wrap: nowrap;
-  align-items: flex-end;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
   max-width: 100%;
-  gap: clamp(2px, 0.4vw, 10px);
-  /* 点歌机字幕是粗黑体 + 描边,不是明朝体;长音/促音的字形也更清楚 */
   font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", "Meiryo",
     "Noto Sans JP", "Microsoft YaHei", sans-serif;
-  font-size: min(clamp(34px, 5.4vw, 104px), calc(92vw / var(--chars, 12)));
+  font-size: min(clamp(34px, 5.6vw, 108px), calc(94vw / var(--chars, 12)));
   font-weight: 800;
-  line-height: 1.12;
+  line-height: 1.14;
   letter-spacing: 0.02em;
 }
 
+.karaoke-text-row {
+  display: flex;
+  flex-wrap: nowrap;
+  /* 按字形底边对齐:带注音的词框更高,用 flex-end 会把它们整体压低 */
+  align-items: baseline;
+  justify-content: center;
+  max-width: 100%;
+  width: 100%;
+  gap: clamp(1px, 0.3vw, 8px);
+  font: inherit;
+  letter-spacing: inherit;
+}
+
 .karaoke-line.muted {
-  font-size: clamp(18px, 1.6vw, 28px);
-  font-weight: 600;
+  font-size: min(clamp(18px, 2.2vw, 40px), calc(94vw / var(--chars, 12)));
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.karaoke-line.muted .karaoke-text-row {
+  font: inherit;
 }
 
 .kword {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
-  line-height: 1.05;
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  line-height: 1.02;
 }
 
-.karaoke-line .surface {
+.kword.muted {
+  pointer-events: none;
+}
+
+.karaoke-text-row .surface {
   font-size: inherit;
   font-weight: inherit;
   letter-spacing: inherit;
 }
 
 .karaoke-line .furi {
-  min-height: 0.62em;
-  font-size: 0.34em;
-  font-weight: 600;
+  /* 固定注音行高度:有没有读音的词框一样高,整行才能按底边对齐 */
+  height: 0.56em;
+  min-height: 0.56em;
+  line-height: 0.56em;
+  font-size: 0.32em;
+  font-weight: 700;
   letter-spacing: 0.06em;
-  color: rgba(255, 255, 255, 0.72);
+  color: #fff;
+  overflow: hidden;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.95));
 }
 
+/* 未唱的字:白字 + 黑色硬描边,落在任何画面上都能读 */
 .kch {
   display: inline-block;
   white-space: pre;
-  /* 未唱的字:白字 + 描边,落在深色板上仍然清晰 */
   color: #fff;
-  -webkit-text-stroke: 1.5px rgba(0, 0, 0, 0.42);
-  text-shadow:
-    0 2px 0 rgba(0, 0, 0, 0.35),
-    0 6px 18px rgba(0, 0, 0, 0.55);
+  -webkit-text-stroke: 2px #000;
+  paint-order: stroke fill;
+  text-shadow: 0 3px 6px rgba(0, 0, 0, 0.85);
 }
 
+/* 已唱完的字:主题色填充、白色描边 —— 点歌机的经典「红字白边」 */
 .kch.sung {
-  color: transparent;
-  background-image: linear-gradient(90deg, var(--k-deep), var(--k-deep));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-stroke: 0;
+  color: var(--k-color);
+  -webkit-text-stroke: 2px #fff;
+  text-shadow:
+    0 0 10px var(--k-glow),
+    0 3px 6px rgba(0, 0, 0, 0.85);
 }
 
+/* 正在唱的字:左半已唱、右半未唱,扫过时从白变主题色 */
 .kch.active {
   color: transparent;
   background-image: linear-gradient(
     90deg,
-    var(--k-deep) 0%,
+    var(--k-color) 0%,
     var(--k-color) calc(var(--p, 0) * 100%),
     #fff calc(var(--p, 0) * 100%),
     #fff 100%
   );
   -webkit-background-clip: text;
   background-clip: text;
+  -webkit-text-stroke: 2px #fff;
+  paint-order: stroke fill;
+  text-shadow:
+    0 0 12px var(--k-glow),
+    0 3px 6px rgba(0, 0, 0, 0.85);
+}
+
+.kch.ghost {
+  visibility: hidden;
   -webkit-text-stroke: 0;
+  text-shadow: none;
 }
 
-.karaoke-romaji {
-  font-size: clamp(13px, 1.1vw, 19px);
-  letter-spacing: 0.16em;
-  color: rgba(255, 255, 255, 0.72);
+/* 罗马音:按词对齐在正下方,和点歌机一样是整行的辅助行 */
+.karaoke-romaji-row {
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: clamp(1px, 0.3vw, 8px);
+  margin-top: clamp(4px, 0.8vh, 10px);
+  max-width: 100%;
+  font-family: "Helvetica Neue", "Inter", system-ui, sans-serif;
+  font-size: min(clamp(13px, 1.5vw, 26px), calc(94vw / var(--chars, 30)));
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
 }
 
-/* 卡拉OK是暗场:底部控制栏用深色渐变,和字幕板同一个体系 */
-.app.karaoke-style .dock {
-  background: linear-gradient(
-    180deg,
-    transparent,
-    rgba(8, 10, 16, 0.72) 45%,
-    rgba(6, 8, 12, 0.95) 100%
-  );
+.kroma-word {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 0 0 auto;
 }
 
 .kroma {
-  margin-top: 0.18em;
-  font-size: 0.24em;
-  font-weight: 500;
-  letter-spacing: 0.1em;
-  color: var(--k-color);
+  color: #fff;
+  -webkit-text-stroke: 1px #000;
+  paint-order: stroke fill;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.85);
 }
 
-.karaoke-line.muted .kroma,
-.karaoke-next-line .kroma {
-  display: none;
+/* ---------- ③ 底部黑边:下一句 ---------- */
+
+.karaoke-bottom {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: clamp(60px, 12vh, 122px);
+  padding: clamp(8px, 1.5vh, 16px) clamp(24px, 5vw, 96px);
+  background: #000;
+}
+
+.karaoke-bottom .karaoke-line .furi {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.karaoke-bottom .karaoke-line .kch {
+  color: #fff;
+  -webkit-text-stroke: 1.5px #000;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.karaoke-bottom .karaoke-romaji-row {
+  margin-top: 4px;
+  font-size: min(clamp(11px, 1.1vw, 18px), calc(94vw / var(--chars, 30)));
+}
+
+.karaoke-bottom .karaoke-romaji-row .kroma {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.karaoke-bottom-blank {
+  display: block;
+  height: 1em;
 }
 
 .karaoke-empty {
-  font-family: var(--serif);
+  font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
   font-size: clamp(30px, 3vw, 52px);
   color: rgba(255, 255, 255, 0.35);
 }
 
-/* 编辑时字幕板让位给输入框:样式无关,沿用默认样式的编辑外观 */
+/* 编辑时输入框浮在画面上方,不影响三区结构 */
 .karaoke-cur .lyr-edit {
   width: min(92%, 1100px);
 }
@@ -540,7 +667,7 @@ body {
 }
 
 .karaoke-cur .lyr-edit-hint {
-  color: rgba(255, 255, 255, 0.62);
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .karaoke-note {
@@ -548,12 +675,31 @@ body {
   line-height: 1.7;
 }
 
-.app.karaoke-style .stage-title-main {
-  color: #fff;
+/* 卡拉OK是暗场:底部控制栏压成半透明黑条,不抢字幕 */
+.app.karaoke-style .dock {
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgba(0, 0, 0, 0.72) 45%,
+    rgba(0, 0, 0, 0.95) 100%
+  );
 }
 
-.app.karaoke-style .stage-title-artist {
-  color: rgba(255, 255, 255, 0.68);
+/* 左上角歌名在卡拉OK样式里不显示,只保留片尾谢幕卡 */
+.app.karaoke-style .stage-title {
+  display: none;
+}
+
+/* 谢幕时卡拉OK画面也要让位给片尾卡,否则字幕会压在谢幕字上 */
+.app.karaoke-style.outro .karaoke-stage {
+  opacity: 0;
+  transition: opacity 1.4s var(--ease-out);
+}
+
+/* ---------- 导出画面:只剩上下黑边与字幕 ---------- */
+
+.app.karaoke-style.render-mode .dock {
+  display: none;
 }
 
 /* ---------- vocab ---------- */
