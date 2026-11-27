@@ -1,13 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { CSSProperties, RefObject } from "react";
-import type { AppSettings, Segment, WordTiming } from "../types";
+import type { Segment, WordTiming } from "../types";
 import type { SyncState } from "../hooks/useSyncEngine";
-import { rubyGroups } from "../furigana";
-import { displayRomaji, lineRomaji } from "../lib/romaji";
+import { displayRomaji } from "../lib/romaji";
 import { useSettings } from "../lib/settings";
 import { effectiveWords } from "../lib/words";
-import { pushUndo } from "../lib/saveQueue";
+import { shownRomaji, shownText, shownZh } from "../lib/lyricText";
+import { charState } from "../lib/charState";
 import type { WordHit } from "./WordPopover";
+import { LineEditBox } from "./LineEditBox";
+import { useLineEditor } from "./LineEditor";
+import { RubySurface } from "./RubySurface";
 
 interface LyricsDisplayProps {
   segments: Segment[];
@@ -35,99 +38,6 @@ interface LyricsDisplayProps {
   canRealign?: boolean;
   /** 点击歌词行空白处跳到这一行开头播放 (§5.2.2) */
   onSeekLine?: (segment: Segment) => void;
-}
-
-/** The text the listener actually sees: the override wins over the aligned
-    original, and an emptied override hides the line's text without deleting
-    the underlying words. Reading marks `[汉字](よみ)` are markup, never sung —
-    strip them for display / char counting (full-width brackets too). */
-const READING_MARK = /[【[](?:[^】\]]+)[】\]]\s*[（(][^（）()]*[)）]/g;
-function stripMarks(text: string): string {
-  return text.replace(READING_MARK, "$1");
-}
-
-function shownText(seg: Segment): string {
-  return stripMarks(seg.lyric_override?.text ?? seg.text ?? "");
-}
-
-function shownZh(seg: Segment): string | undefined {
-  return seg.lyric_override?.translation_zh ?? seg.translation_zh;
-}
-
-/** The romaji under an upcoming/edited line: rebuilt override words win, so a
-    custom reading the user typed shows up in next too. */
-function shownRomaji(
-  seg: Segment,
-  settings: Pick<AppSettings, "particle_reading" | "long_vowel">,
-): string {
-  const ov = seg.lyric_override?.words;
-  if (ov?.length) return lineRomaji(ov, settings);
-  return lineRomaji(seg.words, settings) || seg.romaji;
-}
-
-/**
- * Highlight unit is the character, not the word — the same model LDDC uses
- * (`LyricsWord(start, end, text)`): every glyph has its own start/end, so the
- * wipe advances glyph by glyph and follows held notes exactly.
- */
-type CharState = "sung" | "active" | "upcoming";
-
-function charState(
-  syncState: SyncState,
-  segmentId: number,
-  wordIndex: number,
-  charIndex: number,
-): CharState {
-  if (
-    syncState.activeSegmentId === segmentId &&
-    syncState.activeWordIndex === wordIndex &&
-    syncState.activeKanaIndex === charIndex
-  ) {
-    return "active";
-  }
-  // anything already finished stays lit, so the line never flickers back
-  if (syncState.sungSegmentId === segmentId && syncState.sungWordIndex !== null) {
-    const sw = syncState.sungWordIndex;
-    const sc = syncState.sungKanaIndex ?? -1;
-    if (wordIndex < sw) return "sung";
-    if (wordIndex === sw && charIndex <= sc) return "sung";
-  }
-  return "upcoming";
-}
-
-/** Furigana sits above a kanji run only; kana runs reserve the same height. */
-function RubySurface({
-  word,
-  renderChar,
-  showFurigana = true,
-}: {
-  word: WordTiming;
-  renderChar: (ch: string, index: number) => React.ReactNode;
-  /** the 注音 layer can be switched off per song; the glyphs stay put */
-  showFurigana?: boolean;
-}) {
-  // The glyph offset of each ruby group, computed without a mutable counter —
-  // the compiler rejects a variable reassigned during render because children
-  // callbacks are deferred. Groups are tiny, so the quadratic prefix sum is
-  // irrelevant next to the clarity of staying immutable.
-  const groups = rubyGroups(word);
-  const offsets = groups.map((_, i) =>
-    groups.slice(0, i).reduce((n, g) => n + g.chars.length, 0),
-  );
-  return (
-    <span className={`surface${showFurigana ? "" : " no-furi"}`}>
-      {groups.map((group, gi) => (
-        <span className="ruby-group" key={gi}>
-          <span className={`furi${group.reading && showFurigana ? "" : " blank"}`}>
-            {group.reading ?? ""}
-          </span>
-          <span className="ruby-chars">
-            {group.chars.map((c, k) => renderChar(c.ch, offsets[gi] + k))}
-          </span>
-        </span>
-      ))}
-    </span>
-  );
 }
 
 interface WordViewProps {
@@ -241,86 +151,20 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
   /* ---- lyric editing: double-click to fix the line, right-click to hide it.
      Only the sung text and its Chinese gloss are editable — romaji and the
      word timings come from alignment and are left alone. ---- */
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ text: "", zh: "" });
   // a dblclick always starts with a click; the pending lookup is cancelled
   // here so entering the editor never flashes a word card
   const pickTimerRef = useRef<number | null>(null);
-
-  // a new line scrolls in — drop any half-finished edit so it can't leak
-  // onto the next segment
-  useEffect(() => {
-    setEditing(false);
-  }, [cur?.id]);
-
-  function startEdit() {
-    if (!cur || !onPatch) return;
-    if (pickTimerRef.current) {
-      window.clearTimeout(pickTimerRef.current);
-      pickTimerRef.current = null;
-    }
-    setDraft({ text: shownText(cur), zh: shownZh(cur) ?? "" });
-    setEditing(true);
-  }
-
-  // Enter commits from anywhere while editing — not just when a field is
-  // focused — and a click on empty space saves too. Esc cancels.
-  useEffect(() => {
-    if (!editing) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        commitEdit();
+  const { editing, draft, setDraft, startEdit } = useLineEditor({
+    cur,
+    song,
+    onPatch,
+    beforeStart: () => {
+      if (pickTimerRef.current) {
+        window.clearTimeout(pickTimerRef.current);
+        pickTimerRef.current = null;
       }
-      if (e.key === "Escape") setEditing(false);
-    };
-    const onDown = (e: MouseEvent) => {
-      if ((e.target as HTMLElement).closest(".lyr-edit")) return;
-      commitEdit();
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("mousedown", onDown);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("mousedown", onDown);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, draft, cur]);
-
-  function commitEdit() {
-    if (cur && onPatch) {
-      const newText = draft.text.trim();
-      const newZh = draft.zh.trim();
-      // Only a real text change rewrites `lyric_override.text`: entering edit
-      // mode and leaving, or touching just the translation, must keep the
-      // per-glyph wipe (it still matches the words). A changed text is what
-      // drops the highlight onto the verbatim line.
-      const textChanged = newText !== (cur.lyric_override?.text ?? cur.text);
-      const prevZh = cur.lyric_override?.translation_zh;
-      const zhChanged = newZh !== (prevZh ?? cur.translation_zh ?? "");
-      // snapshot the line before the write so Ctrl+Z can restore it; the
-      // re-tokenised `words` are derived by the PATCH route, so restoring the
-      // override (or its absence) is enough
-      if (textChanged || zhChanged) {
-        pushUndo({
-          song: song ?? "",
-          label: textChanged ? "歌词编辑" : "翻译编辑",
-          segmentId: cur.id,
-          restore: { lyric_override: cur.lyric_override ?? null },
-        });
-      }
-      onPatch(cur.id, {
-        // an emptied line still plays on its timing — it just shows nothing
-        lyric_override: {
-          // keep the old override text when it wasn't edited, and never
-          // introduce `text` on a translation-only edit
-          text: textChanged ? newText : cur.lyric_override?.text,
-          translation_zh: zhChanged ? newZh : prevZh,
-        },
-      });
-    }
-    setEditing(false);
-  }
+    },
+  });
 
   // drive the fill of the single active glyph, nothing else re-renders
   useEffect(() => {
@@ -330,7 +174,7 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
     const ak = syncState.activeKanaIndex;
     if (!el || !cur || aw === null || ak === null) return;
 
-    const ch = cur.words[aw]?.chars?.[ak];
+    const ch = effectiveWords(cur)[aw]?.chars?.[ak];
     if (!ch) return;
 
     let raf = 0;
@@ -392,62 +236,14 @@ export function LyricsDisplay({ segments, syncState, audioRef, clockRef, offset 
         }}
       >
         {editing ? (
-          <div className="lyr-edit">
-            <input
-              className="lyr-edit-text"
-              value={draft.text}
-              placeholder="日文歌词"
-              autoFocus
-              onChange={(e) => setDraft({ ...draft, text: e.target.value })}
-            />
-            <input
-              className="lyr-edit-zh"
-              value={draft.zh}
-              placeholder="中文翻译（可留空）"
-              onChange={(e) => setDraft({ ...draft, zh: e.target.value })}
-            />
-            <span className="lyr-edit-hint">
-              回车或点击空白保存 · Esc 取消 · 改读音写作 <code>[汉字](读音)</code>
-              ，如 <code>[明日](あす)</code>，假名/片假名/罗马音均可
-            </span>
-
-            <div className="lyr-tools">
-              <span className="lyr-tool-label">本行时间</span>
-              <button
-                type="button"
-                className="lyr-nudge"
-                onClick={() => onNudgeLine?.(cur.id, -0.1)}
-                title="这一行整体提前 0.1 秒"
-              >
-                -0.1s
-              </button>
-              <span className="lyr-offset">
-                {(cur.line_offset ?? 0) > 0 ? "+" : ""}
-                {(cur.line_offset ?? 0).toFixed(1)}s
-              </span>
-              <button
-                type="button"
-                className="lyr-nudge"
-                onClick={() => onNudgeLine?.(cur.id, 0.1)}
-                title="这一行整体延后 0.1 秒"
-              >
-                +0.1s
-              </button>
-              <button
-                type="button"
-                className="lyr-realign"
-                onClick={() => onRealign?.(cur.id)}
-                disabled={!canRealign}
-                title={
-                  canRealign
-                    ? "只对这条前后 5 秒重新识别并对齐"
-                    : "需要自定义歌词扩展包(whisper)"
-                }
-              >
-                重新对齐本行
-              </button>
-            </div>
-          </div>
+          <LineEditBox
+            cur={cur}
+            draft={draft}
+            setDraft={setDraft}
+            onNudgeLine={onNudgeLine}
+            onRealign={onRealign}
+            canRealign={canRealign}
+          />
         ) : (
           <>
             {/* a cleared lyric keeps its timing but shows no text or wipe */}

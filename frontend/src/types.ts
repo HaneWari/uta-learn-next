@@ -204,6 +204,10 @@ export interface AppSettings {
   reduce_motion: boolean;
   ui_font: "s" | "m" | "l";
   page_zoom: number;
+  /** 播放页样式:默认的学习版,或仿卡拉OK机的字幕版 */
+  play_style: "default" | "karaoke";
+  /** 卡拉OK样式的字幕主色 */
+  karaoke_color: "coral" | "blue" | "green";
   default_layers: {
     furigana: boolean;
     romaji: boolean;

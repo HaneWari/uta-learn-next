@@ -410,27 +410,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
             {group === "display" && (
               <>
                 <Radio
-                  label="助词读法"
-                  hint="「東京へ行こう」→ toukyou e ikou / toukyou he ikou"
-                  value={settings.particle_reading}
-                  options={[
-                    { value: "pron", label: "按发音" },
-                    { value: "literal", label: "按字面" },
-                  ]}
-                  onChange={(v) => update({ particle_reading: v })}
-                />
-                <Radio
-                  label="长音写法"
-                  hint="「東京」→ toukyou / tōkyō / tookyoo"
-                  value={settings.long_vowel}
-                  options={[
-                    { value: "ou", label: "ou" },
-                    { value: "macron", label: "ō" },
-                    { value: "oo", label: "oo" },
-                  ]}
-                  onChange={(v) => update({ long_vowel: v })}
-                />
-                <Radio
                   label="主题"
                   value={settings.theme}
                   options={[
@@ -484,30 +463,88 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                   on={settings.reduce_motion}
                   onChange={(v) => update({ reduce_motion: v })}
                 />
-                <div className="setrow">
-                  <span className="setlabel">
-                    新歌默认显示
-                    <span className="sethint">只影响之后新生成的歌曲</span>
-                  </span>
-                </div>
-                {(
-                  [
-                    ["furigana", "注音"],
-                    ["romaji", "罗马音"],
-                    ["translation", "翻译"],
-                    ["next_line", "下一句"],
-                    ["cards", "词条卡片"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <Toggle
-                    key={key}
-                    label={label}
-                    on={settings.default_layers[key]}
-                    onChange={(v) =>
-                      update({ default_layers: { ...settings.default_layers, [key]: v } })
-                    }
-                  />
-                ))}
+                <Radio
+                  label="助词读法"
+                  hint="「東京へ行こう」→ toukyou e ikou / toukyou he ikou"
+                  value={settings.particle_reading}
+                  options={[
+                    { value: "pron", label: "按发音" },
+                    { value: "literal", label: "按字面" },
+                  ]}
+                  onChange={(v) => update({ particle_reading: v })}
+                />
+                <Radio
+                  label="长音写法"
+                  hint="「東京」→ toukyou / tōkyō / tookyoo"
+                  value={settings.long_vowel}
+                  options={[
+                    { value: "ou", label: "ou" },
+                    { value: "macron", label: "ō" },
+                    { value: "oo", label: "oo" },
+                  ]}
+                  onChange={(v) => update({ long_vowel: v })}
+                />
+
+                {/* 以下设置只属于某一种播放样式,所以放在样式选择之后 */}
+                <Radio
+                  label="播放样式"
+                  hint="默认样式偏学习;卡拉OK样式只保留字幕、注音与罗马音"
+                  value={settings.play_style}
+                  options={[
+                    { value: "default", label: "默认样式" },
+                    { value: "karaoke", label: "卡拉OK样式" },
+                  ]}
+                  onChange={(v) => update({ play_style: v })}
+                />
+
+                {settings.play_style === "default" ? (
+                  <>
+                    <div className="setrow">
+                      <span className="setlabel">
+                        新歌默认显示
+                        <span className="sethint">只影响之后新生成的歌曲</span>
+                      </span>
+                    </div>
+                    {(
+                      [
+                        ["furigana", "注音"],
+                        ["romaji", "罗马音"],
+                        ["translation", "翻译"],
+                        ["next_line", "下一句"],
+                        ["cards", "词条卡片"],
+                      ] as const
+                    ).map(([key, label]) => (
+                      <Toggle
+                        key={key}
+                        label={label}
+                        on={settings.default_layers[key]}
+                        onChange={(v) =>
+                          update({
+                            default_layers: { ...settings.default_layers, [key]: v },
+                          })
+                        }
+                      />
+                    ))}
+                  </>
+                ) : (
+                  <>
+                    <Radio
+                      label="卡拉OK主题色"
+                      hint="字幕板里已唱部分的颜色;注音与罗马音保持白色系"
+                      value={settings.karaoke_color}
+                      options={[
+                        { value: "coral", label: "珊瑚色" },
+                        { value: "blue", label: "深蓝色" },
+                        { value: "green", label: "绿色" },
+                      ]}
+                      onChange={(v) => update({ karaoke_color: v })}
+                    />
+                    <p className="sethint karaoke-note">
+                      卡拉OK样式不显示中文翻译和词条卡片;右键字幕可切换注音与罗马音。
+                      导出视频时不会出现底部控制栏、进度条和右侧歌词列表。
+                    </p>
+                  </>
+                )}
               </>
             )}
 

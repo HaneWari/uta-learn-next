@@ -48,6 +48,10 @@ def api_settings_patch(patch: SettingsPatch):
         raise HTTPException(status_code=400, detail="主题无效")
     if data.get("ui_font") not in (None, "s", "m", "l"):
         raise HTTPException(status_code=400, detail="界面字号无效")
+    if data.get("play_style") not in (None, "default", "karaoke"):
+        raise HTTPException(status_code=400, detail="播放样式无效")
+    if data.get("karaoke_color") not in (None, "coral", "blue", "green"):
+        raise HTTPException(status_code=400, detail="卡拉OK主题色无效")
     zoom = data.get("page_zoom")
     if zoom is not None and not isinstance(zoom, (int, float)):
         raise HTTPException(status_code=400, detail="页面缩放无效")

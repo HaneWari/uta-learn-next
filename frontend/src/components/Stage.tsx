@@ -14,6 +14,8 @@ import type { LayerKey } from "../store/viewStore";
 import { Player } from "./Player";
 import { LyricsDisplay } from "./LyricsDisplay";
 import { VocabCards } from "./VocabCards";
+import { KaraokeStage } from "./KaraokeStage";
+import { useSettings } from "../lib/settings";
 
 const SEEK_STEP = 3;
 
@@ -122,6 +124,28 @@ const toggleTrans = () => {
   const playback = usePlayback(audioRef, visibleSegments);
   const [helpOpen, setHelpOpen] = useState(false);
   const [wordHit, setWordHit] = useState<WordHit | null>(null);
+  const [settings] = useSettings();
+  const karaoke = settings.play_style === "karaoke";
+  const [karaokeMenu, setKaraokeMenu] = useState<
+    { x: number; y: number } | null
+  >(null);
+  // 右键菜单要在“点空白处”自动收回,和词条卡片的菜单保持同一交互
+  useEffect(() => {
+    if (!karaokeMenu) return;
+    const close = (e: MouseEvent) => {
+      if ((e.target as HTMLElement).closest(".ctx-menu")) return;
+      setKaraokeMenu(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setKaraokeMenu(null);
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [karaokeMenu]);
   // the whole-song rail is off by default (the stage stays clean), and the
   // store lets the shortcut and the rail button agree
   const railOpen = useViewStore((s) => s.railOpen);
@@ -217,7 +241,7 @@ const toggleTrans = () => {
 
   return (
     <div
-      className={`app${render ? " render-mode" : ""}${syncState.outro ? " outro" : ""}`}
+      className={`app${render ? " render-mode" : ""}${karaoke ? " karaoke-style" : ""}${syncState.outro ? " outro" : ""}`}
       data-bg={custom ? "custom" : "default"}
     >
       {custom && (
@@ -236,21 +260,52 @@ const toggleTrans = () => {
         )}
       </div>
 
-      <Player
-        audioRef={audioRef}
-        audioSrc={audioSrc}
-        hasAudio={withAudio}
-        rate={playback.rate}
-        onRate={playback.setRate}
-        looping={!!playback.loopSegment}
-        shadow={playback.shadow}
-        onToggleLoop={() => playback.toggleLoop(visibleSegments[syncState.displayIndex] ?? null)}
-        onToggleShadow={playback.toggleShadow}
-        abLoop={playback.abLoop}
-        onAbLoop={playback.setAbLoop}
-      />
+      {/* 卡拉OK样式在导出时连底部播放控制栏一起消失 */}
+      {!(karaoke && render) && (
+        <Player
+          audioRef={audioRef}
+          audioSrc={audioSrc}
+          hasAudio={withAudio}
+          rate={playback.rate}
+          onRate={playback.setRate}
+          looping={!!playback.loopSegment}
+          shadow={playback.shadow}
+          onToggleLoop={() => playback.toggleLoop(visibleSegments[syncState.displayIndex] ?? null)}
+          onToggleShadow={playback.toggleShadow}
+          abLoop={playback.abLoop}
+          onAbLoop={playback.setAbLoop}
+        />
+      )}
 
       <main className="main">
+        {karaoke ? (
+          <KaraokeStage
+            segments={visibleSegments}
+            syncState={syncState}
+            audioRef={audioRef}
+            clockRef={clockRef}
+            offset={songData.meta.time_offset ?? 0}
+            color={settings.karaoke_color}
+            showFurigana={!layerHidden("furigana", "hidefurigana")}
+            showRomaji={!layerHidden("romaji", "hideromaji")}
+            song={song}
+            onPatch={render ? undefined : onPatchSegment}
+            onNudgeLine={render ? undefined : onNudgeLine}
+            onRealignLine={render ? undefined : onRealignLine}
+            canRealign={canRealign ?? false}
+            onWordClick={render ? undefined : setWordHit}
+            onContextMenu={
+              render
+                ? undefined
+                : (e) => {
+                    // 编辑歌词时保留输入框自己的右键菜单(复制/粘贴)
+                    if ((e.target as HTMLElement).closest(".lyr-edit")) return;
+                    e.preventDefault();
+                    setKaraokeMenu({ x: e.clientX, y: e.clientY });
+                  }
+            }
+          />
+        ) : (
         <LyricsDisplay
           segments={visibleSegments}
           syncState={syncState}
@@ -280,9 +335,10 @@ const toggleTrans = () => {
                 }
           }
         />
+        )}
         {/* the export recorder must never carry the collapsed bar, so the
             whole row is unmounted in render mode when cards are hidden */}
-        {!(render && cardsHidden) && (
+        {!karaoke && !(render && cardsHidden) && (
           <VocabCards
             segment={visibleSegments[syncState.displayIndex] ?? null}
             song={song}
@@ -332,6 +388,37 @@ const toggleTrans = () => {
             }
           }}
         />
+      )}
+
+      {karaokeMenu && !render && (
+        <div
+          className="ctx-menu"
+          style={{ left: karaokeMenu.x, top: karaokeMenu.y }}
+          role="menu"
+        >
+          <button
+            className="ctx-item"
+            onClick={() => {
+              const next = !layerHidden("furigana", "hidefurigana");
+              toggleLayer(song, "furigana", next);
+              onPatchView?.({ furigana: !next });
+              setKaraokeMenu(null);
+            }}
+          >
+            {layerHidden("furigana", "hidefurigana") ? "显示注音" : "隐藏注音"}
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => {
+              const next = !layerHidden("romaji", "hideromaji");
+              toggleLayer(song, "romaji", next);
+              onPatchView?.({ romaji: !next });
+              setKaraokeMenu(null);
+            }}
+          >
+            {layerHidden("romaji", "hideromaji") ? "显示罗马音" : "隐藏罗马音"}
+          </button>
+        </div>
       )}
 
       <div className="curtain" aria-hidden={!syncState.outro}>

@@ -21,6 +21,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   reduce_motion: false,
   ui_font: "m",
   page_zoom: 1,
+  play_style: "default",
+  karaoke_color: "coral",
   default_layers: {
     furigana: true,
     romaji: true,
